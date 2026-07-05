@@ -1,26 +1,125 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f6fbf8;
+  --bg-soft: #dfeae2;
+  --surface: #edf6f0;
+  --surface-2: #ffffff;
+  --border: #c8ddd0;
+  --text: #17352e;
+  --muted: #5f7d70;
+  --accent: #358873;
+  --accent-hover: #2f7866;
+  --accent-soft: #8dc3a7;
+  --accent-mid: #6baf92;
+  --accent-deep: #4e9c81;
+
+  --danger-soft: #fde8e8;
+  --danger-text: #b42318;
+
+  --warning-soft: #fff4d6;
+  --warning-text: #a15c07;
+
+  --neutral-soft: #eef4f0;
+  --neutral-text: #5f7d70;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--bg);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+* {
+  border-color: var(--border);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@keyframes driftOne {
+  0% { transform: translate3d(-30px, -10px, 0) scale(1); }
+  50% { transform: translate3d(90px, 55px, 0) scale(1.12); }
+  100% { transform: translate3d(-30px, -10px, 0) scale(1); }
+}
+
+@keyframes driftTwo {
+  0% { transform: translate3d(40px, 0, 0) scale(1); }
+  50% { transform: translate3d(-80px, 65px, 0) scale(1.1); }
+  100% { transform: translate3d(40px, 0, 0) scale(1); }
+}
+
+@keyframes driftThree {
+  0% { transform: translate3d(0, 40px, 0) scale(1); }
+  50% { transform: translate3d(70px, -55px, 0) scale(1.08); }
+  100% { transform: translate3d(0, 40px, 0) scale(1); }
+}
+
+@keyframes slowWash {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 52%; }
+  100% { background-position: 0% 50%; }
+}
+
+.ambient-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(223, 234, 226, 0.95), rgba(180, 214, 193, 0.55), rgba(246, 251, 248, 0.9), rgba(141, 195, 167, 0.38));
+  background-size: 260% 260%;
+  animation: slowWash 42s ease-in-out infinite;
+}
+
+.ambient-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(141, 195, 167, 0.52), transparent 28%),
+    radial-gradient(circle at 80% 18%, rgba(107, 175, 146, 0.32), transparent 28%),
+    radial-gradient(circle at 60% 88%, rgba(78, 156, 129, 0.26), transparent 34%);
+  opacity: 0.95;
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(48px);
+  opacity: 0.62;
+  mix-blend-mode: multiply;
+}
+
+.ambient-orb-1 {
+  width: 30rem;
+  height: 30rem;
+  top: -8rem;
+  left: -6rem;
+  background: rgba(141, 195, 167, 0.68);
+  animation: driftOne 26s ease-in-out infinite;
+}
+
+.ambient-orb-2 {
+  width: 28rem;
+  height: 28rem;
+  top: 18%;
+  right: -8rem;
+  background: rgba(107, 175, 146, 0.48);
+  animation: driftTwo 32s ease-in-out infinite;
+}
+
+.ambient-orb-3 {
+  width: 26rem;
+  height: 26rem;
+  bottom: -8rem;
+  left: 24%;
+  background: rgba(78, 156, 129, 0.34);
+  animation: driftThree 36s ease-in-out infinite;
 }

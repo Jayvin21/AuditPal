@@ -1,0 +1,378 @@
+import os
+import re
+from typing import Any
+
+import pandas as pd
+
+
+COLUMN_ALIASES = {
+    "document_id": [
+        "invoice no", "invoice number", "inv no", "inv number", "bill no",
+        "bill number", "voucher no", "voucher number", "document no",
+        "document number", "ref no", "reference no", "reference number",
+        "cheque no", "chq no", "transaction id", "utr", "utr no"
+    ],
+    "party_name": [
+        "vendor", "vendor name", "supplier", "supplier name", "party",
+        "party name", "customer", "customer name", "name", "ledger name",
+        "beneficiary", "payee", "payer", "account name"
+    ],
+    "transaction_date": [
+        "date", "invoice date", "bill date", "voucher date", "posting date",
+        "document date", "transaction date", "entry date", "value date"
+    ],
+    "amount": [
+        "amount", "total", "total amount", "gross amount", "invoice amount",
+        "bill amount", "net amount", "taxable value", "value", "grand total",
+        "transaction amount"
+    ],
+    "debit_amount": [
+        "debit", "debit amount", "withdrawal", "withdrawals", "dr", "paid",
+        "payment", "payments", "amount debited"
+    ],
+    "credit_amount": [
+        "credit", "credit amount", "deposit", "deposits", "cr", "received",
+        "receipt", "receipts", "amount credited"
+    ],
+    "gstin": [
+        "gstin", "gst no", "gst number", "gstin/uin", "gstin uin",
+        "supplier gstin", "vendor gstin", "gst"
+    ],
+    "description": [
+        "description", "particulars", "narration", "details", "remarks",
+        "item", "expense head", "transaction remarks"
+    ],
+}
+
+
+STANDARD_FIELDS = [
+    "document_id",
+    "party_name",
+    "transaction_date",
+    "amount",
+    "debit_amount",
+    "credit_amount",
+    "gstin",
+    "description",
+]
+
+
+def normalize_column_name(value: str) -> str:
+    value = str(value).strip().lower()
+    value = re.sub(r"[_\-/]+", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def find_header_row(df_preview: pd.DataFrame) -> int:
+    best_index = 0
+    best_score = -1
+
+    keywords = set()
+    for aliases in COLUMN_ALIASES.values():
+        keywords.update(aliases)
+
+    for idx, row in df_preview.iterrows():
+        score = 0
+        values = [normalize_column_name(cell) for cell in row.tolist() if str(cell).strip() != "nan"]
+
+        for value in values:
+            for keyword in keywords:
+                if keyword == value or keyword in value:
+                    score += 1
+
+        if score > best_score:
+            best_score = score
+            best_index = idx
+
+    return int(best_index)
+
+
+def map_columns(columns: list[str]) -> dict[str, str]:
+    normalized_lookup = {normalize_column_name(col): col for col in columns}
+    mapping: dict[str, str] = {}
+
+    for standard_field, aliases in COLUMN_ALIASES.items():
+        for normalized_col, original_col in normalized_lookup.items():
+            for alias in aliases:
+                alias_norm = normalize_column_name(alias)
+                if normalized_col == alias_norm or alias_norm in normalized_col:
+                    mapping[standard_field] = original_col
+                    break
+            if standard_field in mapping:
+                break
+
+    return mapping
+
+
+def clean_amount(value: Any) -> float | None:
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        return float(value)
+
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null", "-"}:
+        return None
+
+    text = text.replace(",", "")
+    text = text.replace("₹", "")
+    text = text.replace("rs.", "")
+    text = text.replace("rs", "")
+    text = re.sub(r"[^\d.\-]", "", text)
+
+    if not text or text in {"-", ".", "-."}:
+        return None
+
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def derive_amount(row: pd.Series, mapping: dict[str, str | None]) -> float | None:
+    if mapping.get("amount"):
+        return clean_amount(row[mapping["amount"]])
+
+    debit = clean_amount(row[mapping["debit_amount"]]) if mapping.get("debit_amount") else None
+    credit = clean_amount(row[mapping["credit_amount"]]) if mapping.get("credit_amount") else None
+
+    debit = debit or 0
+    credit = credit or 0
+
+    if debit == 0 and credit == 0:
+        return None
+
+    return float(credit - debit)
+
+
+def clean_text(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return None
+
+    return text
+
+
+def clean_date(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+
+    try:
+        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+        if pd.isna(parsed):
+            return clean_text(value)
+        return parsed.date().isoformat()
+    except Exception:
+        return clean_text(value)
+
+
+def row_is_empty(row: pd.Series) -> bool:
+    non_empty = [
+        value for value in row.tolist()
+        if value is not None and not pd.isna(value) and str(value).strip() != ""
+    ]
+    return len(non_empty) == 0
+
+
+def calculate_mapping_confidence(mapping: dict[str, str | None]) -> float:
+    score = 0.0
+
+    important_fields = {
+        "document_id": 0.15,
+        "party_name": 0.20,
+        "amount": 0.25,
+        "debit_amount": 0.125,
+        "credit_amount": 0.125,
+        "transaction_date": 0.15,
+        "gstin": 0.10,
+    }
+
+    for field, weight in important_fields.items():
+        if mapping.get(field):
+            score += weight
+
+    return round(min(score, 1.0), 2)
+
+
+def load_tabular_data(file_path: str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    extension = os.path.splitext(file_path)[1].lower()
+
+    if extension in [".xlsx", ".xls"]:
+        preview = pd.read_excel(file_path, header=None, nrows=20)
+        header_row = find_header_row(preview)
+        sheets = pd.read_excel(file_path, sheet_name=None, header=header_row)
+
+        first_sheet_name = list(sheets.keys())[0]
+        df = sheets[first_sheet_name]
+
+        return df, {
+            "file_type": extension,
+            "header_row": header_row,
+            "sheet_name": first_sheet_name,
+        }
+
+    if extension == ".csv":
+        preview = pd.read_csv(file_path, header=None, nrows=20)
+        header_row = find_header_row(preview)
+        df = pd.read_csv(file_path, header=header_row)
+
+        return df, {
+            "file_type": extension,
+            "header_row": header_row,
+            "sheet_name": None,
+        }
+
+    raise ValueError(f"Unsupported tabular file type: {extension}")
+
+
+def preview_tabular_file(file_path: str) -> dict[str, Any]:
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    df, metadata = load_tabular_data(file_path)
+    df = df.dropna(how="all")
+
+    columns = [str(col).strip() for col in df.columns]
+    detected_mapping = map_columns(columns)
+
+    preview_rows = []
+    for _, row in df.head(8).iterrows():
+        item = {}
+        for col in df.columns:
+            value = row[col]
+            item[str(col)] = None if pd.isna(value) else str(value)
+        preview_rows.append(item)
+
+    return {
+        "available_columns": columns,
+        "detected_mapping": detected_mapping,
+        "preview_rows": preview_rows,
+        "metadata": metadata,
+    }
+
+
+def extract_records_from_dataframe(
+    df: pd.DataFrame,
+    file_id: int,
+    workspace_id: int,
+    record_type: str,
+    sheet_name: str | None = None,
+    user_mapping: dict[str, str | None] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    df = df.dropna(how="all")
+
+    if df.empty:
+        return [], {
+            "sheet_name": sheet_name,
+            "rows_seen": 0,
+            "records_extracted": 0,
+            "column_mapping": {},
+            "warnings": ["Sheet is empty"],
+        }
+
+    columns = [str(col).strip() for col in df.columns]
+    auto_mapping = map_columns(columns)
+
+    if user_mapping:
+        mapping = {
+            field: col
+            for field, col in user_mapping.items()
+            if col and col in df.columns and field in STANDARD_FIELDS
+        }
+    else:
+        mapping = auto_mapping
+
+    records: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    has_amount = "amount" in mapping or "debit_amount" in mapping or "credit_amount" in mapping
+    required_soft_fields = ["party_name"]
+    if not has_amount:
+        required_soft_fields.append("amount")
+
+    missing_mapped_fields = [field for field in required_soft_fields if field not in mapping]
+
+    if missing_mapped_fields:
+        warnings.append(f"Could not map fields: {', '.join(missing_mapped_fields)}")
+
+    for source_idx, row in df.iterrows():
+        if row_is_empty(row):
+            continue
+
+        raw_data = {}
+        for col in df.columns:
+            value = row[col]
+            raw_data[str(col)] = None if pd.isna(value) else str(value)
+
+        description_value = clean_text(row[mapping["description"]]) if "description" in mapping else None
+        party_value = clean_text(row[mapping["party_name"]]) if "party_name" in mapping else description_value
+
+        record = {
+            "workspace_id": workspace_id,
+            "file_id": file_id,
+            "record_type": record_type,
+            "source_row": int(source_idx) + 2,
+            "document_id": clean_text(row[mapping["document_id"]]) if "document_id" in mapping else None,
+            "party_name": party_value,
+            "transaction_date": clean_date(row[mapping["transaction_date"]]) if "transaction_date" in mapping else None,
+            "amount": derive_amount(row, mapping),
+            "gstin": clean_text(row[mapping["gstin"]]) if "gstin" in mapping else None,
+            "raw_data": {
+                "sheet_name": sheet_name,
+                "source_row_values": raw_data,
+                "column_mapping": mapping,
+                "auto_mapping": auto_mapping,
+                "mapping_source": "user" if user_mapping else "auto",
+                "description": description_value,
+            },
+            "confidence": calculate_mapping_confidence(mapping),
+        }
+
+        records.append(record)
+
+    metadata = {
+        "sheet_name": sheet_name,
+        "rows_seen": int(len(df)),
+        "records_extracted": len(records),
+        "column_mapping": mapping,
+        "auto_mapping": auto_mapping,
+        "mapping_source": "user" if user_mapping else "auto",
+        "warnings": warnings,
+    }
+
+    return records, metadata
+
+
+def extract_tabular_file(
+    file_path: str,
+    file_id: int,
+    workspace_id: int,
+    record_type: str,
+    user_mapping: dict[str, str | None] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    df, metadata = load_tabular_data(file_path)
+
+    records, extraction_metadata = extract_records_from_dataframe(
+        df=df,
+        file_id=file_id,
+        workspace_id=workspace_id,
+        record_type=record_type,
+        sheet_name=metadata.get("sheet_name"),
+        user_mapping=user_mapping,
+    )
+
+    return records, {
+        "file_path": file_path,
+        "record_type": record_type,
+        "total_records_extracted": len(records),
+        "file_metadata": metadata,
+        "sheets": [extraction_metadata],
+    }

@@ -1,4 +1,4 @@
-﻿from pydantic import BaseModel
+from pydantic import BaseModel
 from typing import Any
 
 
@@ -14,3 +14,8 @@ class FindingResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FindingUpdate(BaseModel):
+    status: str | None = None
+    reviewer_note: str | None = None

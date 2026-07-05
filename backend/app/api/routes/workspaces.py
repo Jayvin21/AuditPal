@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -24,3 +24,13 @@ def create_workspace(payload: WorkspaceCreate, db: Session = Depends(get_db)):
 @router.get("", response_model=list[WorkspaceResponse])
 def list_workspaces(db: Session = Depends(get_db)):
     return db.query(Workspace).order_by(Workspace.id.desc()).all()
+
+
+@router.get("/{workspace_id}", response_model=WorkspaceResponse)
+def get_workspace(workspace_id: int, db: Session = Depends(get_db)):
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    return workspace

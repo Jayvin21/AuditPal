@@ -1,0 +1,8 @@
+Bill No,Bill Date,Party Name,Gross Amount,GSTIN,Narration
+INV-1001,01-04-2025,Raj Traders,48500,27ABCDE1234F1Z5,Office material purchase
+INV-1002,02-04-2025,Mahavir Stationery,18420,27PQRSX5678K1Z2,Stationery purchase
+INV-1002,02-04-2025,Mahavir Stationery,18420,27PQRSX5678K1Z2,Duplicate entry test case
+,04-04-2025,Bright Computers,65000,27LMNOP4321Q1Z9,Laptop purchase without invoice number
+INV-1005,31-03-2026,Year End Suppliers,100000,INVALIDGST123,Year-end high value purchase
+INV-1006,12-05-2025,,12000,,Missing party and GSTIN
+INV-1007,20-06-2025,Cash Vendor,0,27ABCDE1234F1Z5,Zero amount edge case
