@@ -11,6 +11,7 @@ from app.models.uploaded_file import UploadedFile
 from app.services.audit_engine.checks.basic_purchase_checks import run_basic_purchase_checks
 from app.services.audit_engine.checks.expense_checks import run_expense_checks
 from app.services.audit_engine.checks.sales_checks import run_sales_checks
+from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -38,6 +39,21 @@ SALES_FILE_TYPES = {
     "generic_sales_register",
     "sales",
     "sap_customer_line_items",
+}
+
+
+GST_BOOK_FILE_TYPES = {
+    "purchase_register",
+    "purchase",
+    "purchase_ledger",
+    "tally_purchase_register",
+    "sap_vendor_line_items",
+}
+
+GSTR_2B_FILE_TYPES = {
+    "gstr_2b",
+    "gst_2b",
+    "gstr2b",
 }
 
 BANK_FILE_TYPES = {
@@ -414,6 +430,92 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "expense_records_checked": len(expense_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_gst_reconciliation(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    book_records = [
+        record for record in records
+        if record.record_type.lower() in GST_BOOK_FILE_TYPES
+    ]
+
+    gstr_2b_records = [
+        record for record in records
+        if record.record_type.lower() in GSTR_2B_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not book_records or not gstr_2b_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="gst_reconciliation",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "GST reconciliation needs one books purchase file and one GSTR-2B file.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "book_records": len(book_records),
+                "gstr_2b_records": len(gstr_2b_records),
+                "checked_records": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_gst_reconciliation_checks(book_records, gstr_2b_records)
+    checked_records = len(book_records) + len(gstr_2b_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="gst_reconciliation",
+        status="completed",
+        total_records=checked_records,
+        checked_records=checked_records,
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - checked_records),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "GST reconciliation completed using books and GSTR-2B records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "book_records": len(book_records),
+            "gstr_2b_records": len(gstr_2b_records),
+            "checked_records": checked_records,
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),

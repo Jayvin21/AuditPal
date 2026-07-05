@@ -1,0 +1,8 @@
+Invoice No,Invoice Date,Vendor Name,GSTIN,Taxable Value,Narration
+PB-001,01-04-2025,ABC Suppliers,27ABCDE1234F1Z5,10000,Matched invoice
+PB-002,03-04-2025,Missing In 2B Vendor,27ABCDE1234F1Z5,25000,Books ITC not in 2B
+PB-003,05-04-2025,Amount Mismatch Vendor,27ABCDE1234F1Z5,50000,Amount differs from 2B
+PB-004,07-04-2025,Duplicate Vendor,27ABCDE1234F1Z5,12000,Duplicate in books
+PB-004,07-04-2025,Duplicate Vendor,27ABCDE1234F1Z5,12000,Duplicate in books again
+,08-04-2025,No Invoice Vendor,27ABCDE1234F1Z5,8000,Missing invoice number
+PB-006,09-04-2025,No GSTIN Vendor,,15000,Missing supplier GSTIN

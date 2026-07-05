@@ -1,0 +1,6 @@
+Invoice number,Invoice Date,Trade/Legal name,GSTIN of supplier,Taxable Value,Supply Type
+PB-001,01-04-2025,ABC Suppliers,27ABCDE1234F1Z5,10000,Regular
+PB-003,05-04-2025,Amount Mismatch Vendor,27ABCDE1234F1Z5,48000,Regular
+PB-005,10-04-2025,Only In 2B Vendor,27ABCDE1234F1Z5,30000,Regular
+PB-007,11-04-2025,Duplicate 2B Vendor,27ABCDE1234F1Z5,9000,Regular
+PB-007,11-04-2025,Duplicate 2B Vendor,27ABCDE1234F1Z5,9000,Regular duplicate

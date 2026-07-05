@@ -70,6 +70,8 @@ type AuditRunResponse = {
     purchase_records_checked?: number;
     bank_records?: number;
     ledger_records?: number;
+    book_records?: number;
+    gstr_2b_records?: number;
     checked_records?: number;
     unchecked_records: number;
     issues_found: number;
@@ -428,6 +430,25 @@ export default function WorkspaceDetailPage() {
     }
   }
 
+
+  async function runGstReconciliation() {
+    setBusy(true);
+    setStatusMessage("Running GST reconciliation...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-gst-reconciliation`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("GST reconciliation completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("GST reconciliation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runBankReconciliation() {
     setBusy(true);
     setStatusMessage("Running bank reconciliation...");
@@ -694,6 +715,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runGstReconciliation={runGstReconciliation}
                 runBankReconciliation={runBankReconciliation}
               />
             )}
@@ -1180,6 +1202,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runGstReconciliation,
   runBankReconciliation,
 }: {
   files: UploadedFile[];
@@ -1193,6 +1216,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runGstReconciliation: () => void;
   runBankReconciliation: () => void;
 }) {
   const runHistory = auditRuns ?? [];
@@ -1223,6 +1247,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "gst",
+      label: "GST Reconciliation",
+      description: "Compares books purchase/ITC entries with GSTR-2B and flags missing invoices, amount mismatches, and duplicate ITC risk.",
+      run: runGstReconciliation,
     },
     {
       key: "bank",
@@ -1863,6 +1893,7 @@ function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "gst_reconciliation") return "GST Reconciliation";
   if (type === "bank_reconciliation") return "Bank Reconciliation";
   return type;
 }
@@ -1996,6 +2027,7 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
   if (type.includes("expense") || type.includes("gl") || type.includes("ledger_vouchers")) return "expense";
   if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";

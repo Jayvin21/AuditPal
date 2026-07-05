@@ -7,6 +7,7 @@ from app.models.finding import Finding
 from app.services.audit_engine.runner import (
     run_bank_reconciliation,
     run_expense_audit,
+    run_gst_reconciliation,
     run_purchase_audit,
     run_sales_audit,
 )
@@ -36,6 +37,14 @@ def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_expense_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-gst-reconciliation")
+def run_real_gst_reconciliation(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_gst_reconciliation(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"GST reconciliation failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-bank-reconciliation")
