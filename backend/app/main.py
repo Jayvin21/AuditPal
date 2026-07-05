@@ -13,6 +13,7 @@ from app.api.routes import (
     records,
     column_mappings,
     reports, import_templates,
+    audit_chat,
 )
 
 
@@ -42,3 +43,4 @@ app.include_router(records.router)
 app.include_router(column_mappings.router)
 app.include_router(reports.router)
 app.include_router(import_templates.router)
+app.include_router(audit_chat.router)

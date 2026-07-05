@@ -1084,7 +1084,7 @@ export default function WorkspaceDetailPage() {
             )}
 
             {activeSection === "chat" && (
-              <ChatPlaceholder />
+              <AuditChatSection workspaceId={workspaceId} refreshAll={refreshAll} />
             )}
           </section>
         </div>
@@ -1527,81 +1527,281 @@ function MappingSection({
   saveMapping: () => void;
   parseFiles: () => void;
 }) {
+  const [fieldSearch, setFieldSearch] = useState("");
+  const [fieldGroupFilter, setFieldGroupFilter] = useState("all");
+
+  const mappingFields = useMemo(
+    () => getMappingFieldsForFileType(mappingPreview?.file_type),
+    [mappingPreview?.file_type]
+  );
+
+  const columnOptions: SearchableOption[] = useMemo(() => {
+    if (!mappingPreview) return [{ value: "", label: "Not mapped" }];
+
+    return [
+      { value: "", label: "Not mapped", group: "Mapping" },
+      ...mappingPreview.available_columns.map((column) => ({
+        value: column,
+        label: column,
+        group: "Source column",
+      })),
+    ];
+  }, [mappingPreview]);
+
+  const fieldGroups = useMemo(() => {
+    const groups = Array.from(new Set(mappingFields.map((field) => field.group ?? "Other"))).sort();
+    return ["all", ...groups];
+  }, [mappingFields]);
+
+  const visibleMappingFields = useMemo(() => {
+    const query = fieldSearch.toLowerCase().trim();
+
+    return mappingFields.filter((field) => {
+      const group = field.group ?? "Other";
+
+      const groupMatch = fieldGroupFilter === "all" || group === fieldGroupFilter;
+      const searchMatch =
+        !query ||
+        `${field.key} ${field.label} ${field.group ?? ""} ${field.hint ?? ""}`
+          .toLowerCase()
+          .includes(query);
+
+      return groupMatch && searchMatch;
+    });
+  }, [mappingFields, fieldSearch, fieldGroupFilter]);
+
+  const mappedCount = mappingFields.filter((field) => mappingDraft[field.key]).length;
+  const totalCount = mappingFields.length;
+  const requiredCoreMapped = ["document_id", "party_name", "transaction_date", "amount", "debit_amount", "credit_amount"].some(
+    (key) => mappingDraft[key]
+  );
+
+  function applyDetectedMapping() {
+    if (!mappingPreview) return;
+
+    setMappingDraft((prev) => {
+      const next = { ...prev };
+
+      for (const field of mappingFields) {
+        const detected = mappingPreview.detected_mapping?.[field.key];
+
+        if (!next[field.key] && detected && mappingPreview.available_columns.includes(detected)) {
+          next[field.key] = detected;
+        }
+      }
+
+      return next;
+    });
+  }
+
+  function clearMapping() {
+    setMappingDraft((prev) => {
+      const next = { ...prev };
+
+      for (const field of mappingFields) {
+        next[field.key] = null;
+      }
+
+      return next;
+    });
+  }
+
   return (
     <SectionShell
       title="Column Mapping"
-      subtitle="Map messy Excel, Tally, SAP, or bank statement columns into AuditPal fields."
+      subtitle="Map messy Excel, Tally, SAP, bank, GST, aging, OCR, and fixed-asset columns into AuditPal fields."
     >
       <Card>
         {!mappingPreview ? (
           <EmptyState text="Select Map Columns from the Files section to start mapping an uploaded file." />
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-            <div>
-              <div className="mb-5 flex items-center gap-2">
-                <Columns3 size={18} className="text-[#358873]" />
+          <div className="grid items-start gap-6 lg:grid-cols-[390px_minmax(0,1fr)]">
+            <div className="h-fit">
+              <div className="mb-5 flex items-start gap-2">
+                <Columns3 size={18} className="mt-1 text-[#358873]" />
                 <div>
                   <h2 className="font-medium">File #{mappingPreview.file_id}</h2>
                   <p className="mt-1 text-xs text-[#6B8E7F]">
-                    {formatFileType(mappingPreview.file_type)} · {getMappingProfileKey(mappingPreview.file_type ?? 'standard')} profile
+                    {formatFileType(mappingPreview.file_type)} · {getMappingProfileKey(mappingPreview.file_type ?? "standard")} profile
                   </p>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {getMappingFieldsForFileType(mappingPreview.file_type).map((field) => (
-                  <div key={field.key}>
-                    <label className="mb-2 block text-sm text-[#5F7D70]">
-                      {field.label}
-                      {field.group && (
-                        <span className="ml-2 rounded-full bg-[#EAF4EE] px-2 py-0.5 text-[10px] font-medium text-[#2F7866]">
-                          {field.group}
-                        </span>
-                      )}
-                    </label>
-                    <select
-                      value={mappingDraft[field.key] ?? ""}
-                      onChange={(e) =>
-                        setMappingDraft((prev) => ({
-                          ...prev,
-                          [field.key]: e.target.value || null,
-                        }))
-                      }
-                      className="w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
-                    >
-                      <option value="">Not mapped</option>
-                      {mappingPreview.available_columns.map((column) => (
-                        <option key={column} value={column}>
-                          {column}
-                        </option>
-                      ))}
-                    </select>
+              <div className="mb-5 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6B8E7F]">
+                      Mapping progress
+                    </p>
+                    <p className="mt-1 text-sm text-[#5F7D70]">
+                      {mappedCount} of {totalCount} fields mapped.
+                    </p>
                   </div>
-                ))}
 
-                <div className="grid gap-3">
-                  <button
-                    onClick={saveMapping}
-                    disabled={busy}
-                    className="rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+                  <span
+                    className={
+                      requiredCoreMapped
+                        ? "rounded-full bg-[#EAF4EE] px-3 py-1 text-xs font-medium text-[#2F7866]"
+                        : "rounded-full bg-[#FFF7E6] px-3 py-1 text-xs font-medium text-[#B76E00]"
+                    }
                   >
-                    Save Mapping
+                    {requiredCoreMapped ? "Ready to extract" : "Core fields needed"}
+                  </span>
+                </div>
+
+                <div className="h-2 overflow-hidden rounded-full bg-[#DDECE4]">
+                  <div
+                    className="h-full rounded-full bg-[#358873]"
+                    style={{ width: `${totalCount === 0 ? 0 : Math.round((mappedCount / totalCount) * 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="mb-5 grid gap-3 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4">
+                <div>
+                  <label className="mb-2 block text-sm text-[#5F7D70]">
+                    Search mapping fields
+                  </label>
+                  <input
+                    value={fieldSearch}
+                    onChange={(event) => setFieldSearch(event.target.value)}
+                    placeholder="Search amount, GSTIN, WDV, PAN, due date..."
+                    className="w-full rounded-xl border border-[#C8DDD0] bg-white px-3 py-2 text-sm outline-none focus:border-[#4E9C81]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm text-[#5F7D70]">
+                    Field group
+                  </label>
+                  <select
+                    value={fieldGroupFilter}
+                    onChange={(event) => setFieldGroupFilter(event.target.value)}
+                    className="w-full rounded-xl border border-[#C8DDD0] bg-white px-3 py-2 text-sm outline-none focus:border-[#4E9C81]"
+                  >
+                    {fieldGroups.map((group) => (
+                      <option key={group} value={group}>
+                        {group === "all" ? "All groups" : group}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid gap-2 md:grid-cols-2">
+                  <button
+                    onClick={applyDetectedMapping}
+                    disabled={busy}
+                    className="rounded-xl border border-[#B4D6C1] bg-white px-4 py-2 text-sm font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                  >
+                    Auto-fill detected
                   </button>
 
                   <button
-                    onClick={parseFiles}
+                    onClick={clearMapping}
                     disabled={busy}
-                    className="rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                    className="rounded-xl border border-[#F3CACA] bg-white px-4 py-2 text-sm font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
                   >
-                    Extract Records
+                    Clear mapping
                   </button>
                 </div>
+              </div>
+
+              <div className="max-h-[680px] space-y-4 overflow-auto pr-1">
+                {visibleMappingFields.length === 0 ? (
+                  <EmptyState text="No mapping fields match the current search." />
+                ) : (
+                  visibleMappingFields.map((field) => {
+                    const detected = mappingPreview.detected_mapping?.[field.key];
+                    const mapped = mappingDraft[field.key];
+
+                    return (
+                      <div
+                        key={field.key}
+                        className={
+                          mapped
+                            ? "rounded-2xl border border-[#B4D6C1] bg-[#F6FBF8] p-4"
+                            : "rounded-2xl border border-[#D6E6DD] bg-white p-4"
+                        }
+                      >
+                        <label className="mb-2 block text-sm font-medium text-[#17352E]">
+                          {field.label}
+                        </label>
+
+                        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                          {field.group && (
+                            <span className="rounded-full bg-[#EAF4EE] px-2 py-1 font-medium text-[#2F7866]">
+                              {field.group}
+                            </span>
+                          )}
+
+                          {mapped ? (
+                            <span className="rounded-full bg-[#EAF4EE] px-2 py-1 font-medium text-[#2F7866]">
+                              Mapped
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-[#FFF7E6] px-2 py-1 font-medium text-[#B76E00]">
+                              Not mapped
+                            </span>
+                          )}
+
+                          {detected && (
+                            <span className="rounded-full bg-[#EFF7F2] px-2 py-1 font-medium text-[#42685B]">
+                              Detected: {detected}
+                            </span>
+                          )}
+                        </div>
+
+                        <SearchableSelect
+                          value={mappingDraft[field.key] ?? ""}
+                          onChange={(value) =>
+                            setMappingDraft((prev) => ({
+                              ...prev,
+                              [field.key]: value || null,
+                            }))
+                          }
+                          options={columnOptions}
+                          placeholder="Search source column..."
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="sticky bottom-0 mt-5 grid gap-3 rounded-2xl border border-[#D6E6DD] bg-white/95 p-4 shadow-sm backdrop-blur">
+                <button
+                  onClick={saveMapping}
+                  disabled={busy}
+                  className="rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+                >
+                  Save Mapping
+                </button>
+
+                <button
+                  onClick={parseFiles}
+                  disabled={busy}
+                  className="rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                >
+                  Extract Records
+                </button>
               </div>
             </div>
 
             <div className="min-w-0">
-              <h3 className="mb-3 font-medium">Preview Rows</h3>
-              <div className="max-h-[560px] overflow-auto rounded-xl border border-[#D6E6DD]">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-medium">Preview Rows</h3>
+                  <p className="mt-1 text-sm text-[#5F7D70]">
+                    First rows from detected header. Use this to verify mapping before extraction.
+                  </p>
+                </div>
+
+                <span className="rounded-full bg-[#EAF4EE] px-3 py-1 text-xs font-medium text-[#2F7866]">
+                  {mappingPreview.available_columns.length} columns
+                </span>
+              </div>
+
+              <div className="max-h-[760px] overflow-auto rounded-xl border border-[#D6E6DD]">
                 <table className="w-full text-left text-xs">
                   <thead className="sticky top-0 bg-[#EDF6F0] text-[#5F7D70]">
                     <tr>
@@ -2596,24 +2796,236 @@ function ReportsSection({
   );
 }
 
-function ChatPlaceholder() {
+type AuditChatLink = {
+  label: string;
+  url: string;
+};
+
+type AuditChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  actions?: string[];
+  links?: AuditChatLink[];
+};
+
+function AuditChatSection({
+  workspaceId,
+  refreshAll,
+}: {
+  workspaceId: number;
+  refreshAll: () => Promise<void>;
+}) {
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [messages, setMessages] = useState<AuditChatMessage[]>([
+    {
+      role: "assistant",
+      content:
+        "I can inspect this workspace, retrieve relevant findings/records, run audit modules, extract records, draft clarification lists, and prepare CSV/PDF export links.",
+      actions: ["Audit Chat initialized"],
+    },
+  ]);
+
+  const quickPrompts = [
+    "Summarize this workspace",
+    "Show high-risk findings",
+    "Draft client clarification list",
+    "Which vendors have the most findings?",
+    "Run audit for the latest file",
+    "Export PDF and CSV",
+  ];
+
+  async function sendMessage(message?: string) {
+    const finalMessage = (message ?? input).trim();
+
+    if (!finalMessage || busy) return;
+
+    setInput("");
+    setBusy(true);
+
+    setMessages((current) => [
+      ...current,
+      { role: "user", content: finalMessage },
+    ]);
+
+    try {
+      const res = await api.post(`/audit-chat/${workspaceId}/message`, {
+        message: finalMessage,
+      });
+
+      const answer = res.data?.answer ?? "No answer returned.";
+      const actions = res.data?.actions ?? [];
+      const links = res.data?.links ?? [];
+
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: answer,
+          actions,
+          links,
+        },
+      ]);
+
+      await refreshAll();
+    } catch (error: unknown) {
+      let detail = "Audit chat request failed.";
+
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error
+      ) {
+        const maybeAxios = error as { response?: { data?: { detail?: string } } };
+        detail = maybeAxios.response?.data?.detail ?? detail;
+      }
+
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          content: detail,
+        },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <SectionShell
       title="Audit Chat"
-      subtitle="Ask questions about records, findings, risk, and reviewer status. Coming next."
+      subtitle="Ask questions, retrieve audit context, run modules, and prepare exports from one assistant panel."
     >
-      <Card>
-        <div className="rounded-2xl border border-dashed border-[#B4D6C1] bg-[#F6FBF8] p-8 text-center">
-          <MessageSquare className="mx-auto text-[#358873]" size={34} />
-          <h2 className="mt-4 text-xl font-semibold text-[#17352E]">
-            Audit Chat is the next AI layer
-          </h2>
-          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#5F7D70]">
-            This will let users ask questions like “show high-risk findings,”
-            “which entries need clarification,” and “summarize bank reconciliation issues.”
-          </p>
+      <div className="grid items-start gap-6 lg:grid-cols-[1fr_330px]">
+        <Card>
+          <div className="mb-5 flex items-center gap-2">
+            <MessageSquare size={18} className="text-[#358873]" />
+            <h2 className="font-medium">Workspace audit assistant</h2>
+          </div>
+
+          <div className="max-h-[620px] space-y-4 overflow-auto rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4">
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                className={
+                  message.role === "user"
+                    ? "ml-auto max-w-[85%] rounded-2xl bg-[#358873] p-4 text-white"
+                    : "mr-auto max-w-[92%] rounded-2xl border border-[#D6E6DD] bg-white p-4 text-[#17352E]"
+                }
+              >
+                <p className="whitespace-pre-wrap text-sm leading-6">
+                  {message.content}
+                </p>
+
+                {message.actions && message.actions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {message.actions.map((action) => (
+                      <span
+                        key={action}
+                        className={
+                          message.role === "user"
+                            ? "rounded-full bg-white/15 px-2 py-1 text-[11px] text-white"
+                            : "rounded-full bg-[#EAF4EE] px-2 py-1 text-[11px] font-medium text-[#2F7866]"
+                        }
+                      >
+                        {action}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {message.links && message.links.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {message.links.map((link) => (
+                      <a
+                        key={link.url}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-xl border border-[#B4D6C1] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
+                      >
+                        <Download size={13} />
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {busy && (
+              <div className="mr-auto max-w-[85%] rounded-2xl border border-[#D6E6DD] bg-white p-4 text-sm text-[#5F7D70]">
+                Thinking and checking audit workspace...
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-3">
+            <textarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              rows={3}
+              placeholder="Ask: run fixed asset audit, summarize high-risk findings, draft client clarification list..."
+              className="w-full resize-none rounded-xl border border-[#C8DDD0] bg-white px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
+            />
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-[#6B8E7F]">
+                Agent actions are deterministic. It can run existing AuditPal tools and retrieve workspace context.
+              </p>
+
+              <button
+                onClick={() => sendMessage()}
+                disabled={busy || !input.trim()}
+                className="rounded-xl bg-[#358873] px-5 py-3 text-sm font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        <div className="space-y-4">
+          <Card>
+            <h2 className="font-medium text-[#17352E]">Quick actions</h2>
+            <div className="mt-4 grid gap-2">
+              {quickPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => sendMessage(prompt)}
+                  disabled={busy}
+                  className="rounded-xl border border-[#B4D6C1] bg-white px-4 py-3 text-left text-sm font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
+            <h2 className="font-medium text-[#17352E]">Agent can do</h2>
+            <div className="mt-4 space-y-3 text-sm leading-6 text-[#5F7D70]">
+              <p>• Retrieve findings and records relevant to your question.</p>
+              <p>• Run audit modules using the existing audit engine.</p>
+              <p>• Extract records using saved mappings.</p>
+              <p>• Summarize risk, review status, vendors, and open issues.</p>
+              <p>• Prepare CSV/PDF export links.</p>
+            </div>
+          </Card>
+
+          <Card>
+            <h2 className="font-medium text-[#17352E]">Example commands</h2>
+            <div className="mt-4 space-y-2 text-sm text-[#5F7D70]">
+              <p>"Run GST reconciliation"</p>
+              <p>"Show unresolved high risk issues"</p>
+              <p>"Which vendors have the most findings?"</p>
+              <p>"Extract records again"</p>
+              <p>"Export PDF and CSV"</p>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </div>
     </SectionShell>
   );
 }
