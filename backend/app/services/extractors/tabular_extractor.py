@@ -10,8 +10,7 @@ COLUMN_ALIASES = {
         "invoice no", "invoice number", "inv no", "inv number", "bill no",
         "bill number", "voucher no", "voucher number", "document no",
         "document number", "ref no", "reference no", "reference number",
-        "cheque no", "chq no", "transaction id", "utr", "utr no"
-    
+        "cheque no", "chq no", "transaction id", "utr", "utr no",
         "voucher no.",
         "vch no",
         "vch no.",
@@ -25,8 +24,7 @@ COLUMN_ALIASES = {
     "party_name": [
         "vendor", "vendor name", "supplier", "supplier name", "party",
         "party name", "customer", "customer name", "name", "ledger name",
-        "beneficiary", "payee", "payer", "account name"
-    
+        "beneficiary", "payee", "payer", "account name",
         "particulars",
         "name 1",
         "g/l account",
@@ -42,8 +40,7 @@ COLUMN_ALIASES = {
     "amount": [
         "amount", "total", "total amount", "gross amount", "invoice amount",
         "bill amount", "net amount", "taxable value", "value", "grand total",
-        "transaction amount"
-    
+        "transaction amount",
         "gross total",
         "invoice value",
         "amount in local currency",
@@ -52,24 +49,20 @@ COLUMN_ALIASES = {
         "debit/credit amount",],
     "debit_amount": [
         "debit", "debit amount", "withdrawal", "withdrawals", "dr", "paid",
-        "payment", "payments", "amount debited"
-    
+        "payment", "payments", "amount debited",
         "paid amount",],
     "credit_amount": [
         "credit", "credit amount", "deposit", "deposits", "cr", "received",
-        "receipt", "receipts", "amount credited"
-    
+        "receipt", "receipts", "amount credited",
         "received amount",],
     "gstin": [
         "gstin", "gst no", "gst number", "gstin/uin", "gstin uin",
-        "supplier gstin", "vendor gstin", "gst"
-    
+        "supplier gstin", "vendor gstin", "gst",
         "party gstin",
         "gstin of supplier",],
     "description": [
         "description", "particulars", "narration", "details", "remarks",
-        "item", "expense head", "transaction remarks"
-    
+        "item", "expense head", "transaction remarks",
         "text",
         "document header text",
         "voucher type",
@@ -78,6 +71,117 @@ COLUMN_ALIASES = {
         "memo",],
 }
 
+
+
+EXTRA_COLUMN_ALIASES = {
+    "supplier_gstin": [
+        "supplier gstin", "gstin of supplier", "vendor gstin", "party gstin",
+        "gstin/uin", "gstin uin",
+    ],
+    "customer_gstin": [
+        "customer gstin", "recipient gstin", "buyer gstin",
+    ],
+    "taxable_value": [
+        "taxable value", "taxable amount", "assessable value", "tax base",
+    ],
+    "invoice_value": [
+        "invoice value", "gross total", "gross amount", "invoice amount",
+        "bill amount", "total invoice value",
+    ],
+    "igst": ["igst", "igst amount", "integrated tax", "integrated tax amount"],
+    "cgst": ["cgst", "cgst amount", "central tax", "central tax amount"],
+    "sgst": ["sgst", "sgst amount", "state tax", "state tax amount"],
+    "place_of_supply": ["place of supply", "pos", "state", "supply state"],
+    "supply_type": ["supply type", "type of supply", "invoice type"],
+
+    "pan": [
+        "pan", "vendor pan", "supplier pan", "permanent account number",
+        "pan no", "pan number",
+    ],
+    "tds_amount": [
+        "tds amount", "tds deducted", "tax deducted", "withholding tax",
+        "wht amount", "tds payable",
+    ],
+    "tds_section": [
+        "tds section", "section", "tds nature", "withholding tax code",
+        "wht code", "194c", "194j", "194a",
+    ],
+    "payment_nature": [
+        "nature", "expense nature", "payment nature", "ledger name",
+        "particulars",
+    ],
+
+    "asset_id": [
+        "asset id", "asset code", "asset no", "asset number", "fa code",
+        "tag no",
+    ],
+    "asset_category": [
+        "asset category", "category", "block", "asset class", "class",
+        "group",
+    ],
+    "asset_description": [
+        "asset description", "description", "asset name", "particulars",
+    ],
+    "asset_cost": [
+        "cost", "asset cost", "gross block", "original cost",
+        "capitalized amount", "acquisition value", "purchase value",
+    ],
+    "depreciation": [
+        "depreciation", "depreciation amount", "current year depreciation",
+        "dep for the year", "accumulated depreciation", "accum dep",
+    ],
+    "depreciation_rate": [
+        "depreciation rate", "dep rate", "rate", "useful life rate",
+    ],
+    "wdv": [
+        "wdv", "net block", "carrying amount", "written down value",
+        "net book value",
+    ],
+    "asset_status": ["status", "asset status", "disposal status"],
+
+    "ledger_name": [
+        "ledger name", "account name", "account", "particulars",
+        "g/l account", "gl account", "ledger",
+    ],
+    "ledger_group": [
+        "group", "primary group", "schedule", "fs group",
+        "classification", "nature",
+    ],
+    "opening_balance": ["opening balance", "opening", "opening bal"],
+    "debit_balance": ["debit", "debit balance", "dr", "dr balance"],
+    "credit_balance": ["credit", "credit balance", "cr", "cr balance"],
+    "closing_balance": [
+        "closing balance", "balance", "closing", "net balance",
+        "current year balance",
+    ],
+
+    "invoice_date": [
+        "invoice date", "bill date", "document date", "posting date", "date",
+    ],
+    "due_date": ["due date", "payment due date", "net due date", "aging date", "due"],
+    "days_overdue": ["days overdue", "overdue days", "age", "aging days", "days"],
+    "outstanding_amount": [
+        "outstanding", "outstanding amount", "balance", "closing balance",
+        "open amount", "amount due", "net due", "amount",
+    ],
+    "aging_bucket": ["aging bucket", "bucket", "ageing bucket"],
+    "party_type": ["party type", "customer vendor type", "type", "nature"],
+
+    "ocr_confidence": [
+        "ocr confidence", "confidence", "confidence score",
+        "extraction confidence",
+    ],
+    "document_type": ["document type", "doc type", "invoice type", "bill type"],
+    "extracted_text": ["ocr text", "extracted text", "text", "description"],
+    "support_file_name": ["support file name", "file name", "filename", "source file"],
+
+    "bank_reference": ["bank reference", "utr", "utr no", "transaction id", "reference no"],
+    "cheque_no": ["cheque no", "chq no", "instrument no"],
+    "value_date": ["value date", "bank date"],
+}
+
+for field, aliases in EXTRA_COLUMN_ALIASES.items():
+    COLUMN_ALIASES[field] = aliases
 
 STANDARD_FIELDS = [
     "document_id",
@@ -89,6 +193,39 @@ STANDARD_FIELDS = [
     "gstin",
     "description",
 ]
+
+ALLOWED_MAPPING_FIELDS = set(STANDARD_FIELDS) | set(EXTRA_COLUMN_ALIASES.keys())
+
+TEXT_EXTRA_FIELDS = {
+    "supplier_gstin",
+    "customer_gstin",
+    "place_of_supply",
+    "supply_type",
+    "pan",
+    "tds_section",
+    "payment_nature",
+    "asset_id",
+    "asset_category",
+    "asset_description",
+    "asset_status",
+    "ledger_name",
+    "ledger_group",
+    "aging_bucket",
+    "party_type",
+    "document_type",
+    "extracted_text",
+    "support_file_name",
+    "bank_reference",
+    "cheque_no",
+}
+
+DATE_EXTRA_FIELDS = {
+    "invoice_date",
+    "due_date",
+    "value_date",
+}
+
+AMOUNT_EXTRA_FIELDS = set(EXTRA_COLUMN_ALIASES.keys()) - TEXT_EXTRA_FIELDS - DATE_EXTRA_FIELDS
 
 
 def normalize_column_name(value: str) -> str:
@@ -290,6 +427,28 @@ def preview_tabular_file(file_path: str) -> dict[str, Any]:
     }
 
 
+
+def extract_extra_mapped_values(row: pd.Series, mapping: dict[str, str | None]) -> dict[str, Any]:
+    extra_values: dict[str, Any] = {}
+
+    for field in ALLOWED_MAPPING_FIELDS:
+        if field in STANDARD_FIELDS:
+            continue
+
+        column = mapping.get(field)
+        if not column or column not in row.index:
+            continue
+
+        if field in DATE_EXTRA_FIELDS:
+            extra_values[field] = clean_date(row[column])
+        elif field in AMOUNT_EXTRA_FIELDS:
+            extra_values[field] = clean_amount(row[column])
+        else:
+            extra_values[field] = clean_text(row[column])
+
+    return extra_values
+
+
 def extract_records_from_dataframe(
     df: pd.DataFrame,
     file_id: int,
@@ -316,7 +475,7 @@ def extract_records_from_dataframe(
         mapping = {
             field: col
             for field, col in user_mapping.items()
-            if col and col in df.columns and field in STANDARD_FIELDS
+            if col and col in df.columns and field in ALLOWED_MAPPING_FIELDS
         }
     else:
         mapping = auto_mapping
@@ -343,6 +502,8 @@ def extract_records_from_dataframe(
             value = row[col]
             raw_data[str(col)] = None if pd.isna(value) else str(value)
 
+        extra_values = extract_extra_mapped_values(row, mapping)
+
         description_value = clean_text(row[mapping["description"]]) if "description" in mapping else None
         party_value = clean_text(row[mapping["party_name"]]) if "party_name" in mapping else description_value
 
@@ -357,8 +518,11 @@ def extract_records_from_dataframe(
             "amount": derive_amount(row, mapping),
             "gstin": clean_text(row[mapping["gstin"]]) if "gstin" in mapping else None,
             "raw_data": {
+                **raw_data,
+                **extra_values,
                 "sheet_name": sheet_name,
                 "source_row_values": raw_data,
+                "extra_mapped_values": extra_values,
                 "column_mapping": mapping,
                 "auto_mapping": auto_mapping,
                 "mapping_source": "user" if user_mapping else "auto",

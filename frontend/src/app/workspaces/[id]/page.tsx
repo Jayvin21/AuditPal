@@ -102,22 +102,118 @@ type AuditRunItem = {
 type ColumnMappingResponse = {
   file_id: number;
   workspace_id: number;
+  file_type: string;
   available_columns: string[];
   detected_mapping: Record<string, string>;
   saved_mapping: Record<string, string | null> | null;
   preview_rows: Record<string, unknown>[];
 };
 
-const standardFields = [
-  { key: "document_id", label: "Invoice / Bill / Voucher / UTR No" },
-  { key: "party_name", label: "Vendor / Party / Payee Name" },
-  { key: "transaction_date", label: "Transaction Date" },
-  { key: "amount", label: "Amount" },
-  { key: "debit_amount", label: "Debit / Withdrawal / Payment" },
-  { key: "credit_amount", label: "Credit / Deposit / Receipt" },
-  { key: "gstin", label: "GSTIN" },
-  { key: "description", label: "Description / Narration" },
+type MappingField = {
+  key: string;
+  label: string;
+  group?: string;
+  hint?: string;
+};
+
+const standardFields: MappingField[] = [
+  { key: "document_id", label: "Invoice / Bill / Voucher / UTR No", group: "Core" },
+  { key: "party_name", label: "Vendor / Party / Payee Name", group: "Core" },
+  { key: "transaction_date", label: "Transaction Date", group: "Core" },
+  { key: "amount", label: "Amount", group: "Core" },
+  { key: "debit_amount", label: "Debit / Withdrawal / Payment", group: "Core" },
+  { key: "credit_amount", label: "Credit / Deposit / Receipt", group: "Core" },
+  { key: "gstin", label: "GSTIN", group: "Core" },
+  { key: "description", label: "Description / Narration", group: "Core" },
 ];
+
+const extraMappingFields: Record<string, MappingField[]> = {
+  gst: [
+    { key: "supplier_gstin", label: "Supplier GSTIN", group: "GST" },
+    { key: "customer_gstin", label: "Customer GSTIN", group: "GST" },
+    { key: "taxable_value", label: "Taxable Value", group: "GST" },
+    { key: "invoice_value", label: "Invoice Value", group: "GST" },
+    { key: "igst", label: "IGST", group: "GST" },
+    { key: "cgst", label: "CGST", group: "GST" },
+    { key: "sgst", label: "SGST", group: "GST" },
+    { key: "place_of_supply", label: "Place of Supply", group: "GST" },
+    { key: "supply_type", label: "Supply Type", group: "GST" },
+  ],
+  tds: [
+    { key: "pan", label: "PAN", group: "TDS" },
+    { key: "tds_amount", label: "TDS Amount", group: "TDS" },
+    { key: "tds_section", label: "TDS Section / WHT Code", group: "TDS" },
+    { key: "payment_nature", label: "Payment Nature", group: "TDS" },
+  ],
+  fixed_asset: [
+    { key: "asset_id", label: "Asset ID / Asset Code", group: "Fixed Asset" },
+    { key: "asset_category", label: "Asset Category / Block", group: "Fixed Asset" },
+    { key: "asset_description", label: "Asset Description", group: "Fixed Asset" },
+    { key: "asset_cost", label: "Asset Cost / Gross Block", group: "Fixed Asset" },
+    { key: "depreciation", label: "Depreciation", group: "Fixed Asset" },
+    { key: "depreciation_rate", label: "Depreciation Rate", group: "Fixed Asset" },
+    { key: "wdv", label: "WDV / Net Block", group: "Fixed Asset" },
+    { key: "asset_status", label: "Asset Status", group: "Fixed Asset" },
+  ],
+  trial_balance: [
+    { key: "ledger_name", label: "Ledger / Account Name", group: "Trial Balance" },
+    { key: "ledger_group", label: "Group / Schedule / Classification", group: "Trial Balance" },
+    { key: "opening_balance", label: "Opening Balance", group: "Trial Balance" },
+    { key: "debit_balance", label: "Debit Balance", group: "Trial Balance" },
+    { key: "credit_balance", label: "Credit Balance", group: "Trial Balance" },
+    { key: "closing_balance", label: "Closing Balance / Net Balance", group: "Trial Balance" },
+  ],
+  aging: [
+    { key: "invoice_date", label: "Invoice / Bill Date", group: "Aging" },
+    { key: "due_date", label: "Due Date", group: "Aging" },
+    { key: "days_overdue", label: "Days Overdue / Aging Days", group: "Aging" },
+    { key: "outstanding_amount", label: "Outstanding Amount", group: "Aging" },
+    { key: "aging_bucket", label: "Aging Bucket", group: "Aging" },
+    { key: "party_type", label: "Customer / Vendor Type", group: "Aging" },
+  ],
+  document_match: [
+    { key: "ocr_confidence", label: "OCR Confidence", group: "Document Matching" },
+    { key: "document_type", label: "Document Type", group: "Document Matching" },
+    { key: "extracted_text", label: "Extracted OCR Text", group: "Document Matching" },
+    { key: "support_file_name", label: "Support File Name", group: "Document Matching" },
+  ],
+  bank: [
+    { key: "bank_reference", label: "Bank Reference / UTR", group: "Bank" },
+    { key: "cheque_no", label: "Cheque No", group: "Bank" },
+    { key: "value_date", label: "Value Date", group: "Bank" },
+  ],
+};
+
+function getMappingProfileKey(fileType?: string) {
+  const type = (fileType ?? "").toLowerCase();
+
+  if (type.includes("gstr") || type.includes("gst")) return "gst";
+  if (type.includes("tds")) return "tds";
+  if (type.includes("fixed_asset") || type.includes("asset_register") || type.includes("depreciation") || type.includes("tally_fixed")) return "fixed_asset";
+  if (type.includes("trial_balance") || type.includes("financial_statement")) return "trial_balance";
+  if (type.includes("aging") || type.includes("receivable") || type.includes("payable") || type.includes("outstanding") || type.includes("open_items")) return "aging";
+  if (type.includes("ocr") || type.includes("support") || type.includes("document_extract") || type.includes("voucher_support")) return "document_match";
+  if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";
+
+  return "standard";
+}
+
+function getMappingFieldsForFileType(fileType?: string) {
+  const profileKey = getMappingProfileKey(fileType);
+  const extraFields = extraMappingFields[profileKey] ?? [];
+
+  const byKey = new Map<string, MappingField>();
+
+  for (const field of standardFields) {
+    byKey.set(field.key, field);
+  }
+
+  for (const field of extraFields) {
+    byKey.set(field.key, field);
+  }
+
+  return Array.from(byKey.values());
+}
 
 type SearchableOption = {
   value: string;
@@ -376,7 +472,7 @@ export default function WorkspaceDetailPage() {
       setMappingPreview(data);
 
       const initialMapping: Record<string, string | null> = {};
-      for (const field of standardFields) {
+      for (const field of getMappingFieldsForFileType(data.file_type)) {
         initialMapping[field.key] =
           data.saved_mapping?.[field.key] ??
           data.detected_mapping?.[field.key] ??
@@ -1391,14 +1487,24 @@ function MappingSection({
             <div>
               <div className="mb-5 flex items-center gap-2">
                 <Columns3 size={18} className="text-[#358873]" />
-                <h2 className="font-medium">File #{mappingPreview.file_id}</h2>
+                <div>
+                  <h2 className="font-medium">File #{mappingPreview.file_id}</h2>
+                  <p className="mt-1 text-xs text-[#6B8E7F]">
+                    {formatFileType(mappingPreview.file_type)} · {getMappingProfileKey(mappingPreview.file_type ?? 'standard')} profile
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-4">
-                {standardFields.map((field) => (
+                {getMappingFieldsForFileType(mappingPreview.file_type).map((field) => (
                   <div key={field.key}>
                     <label className="mb-2 block text-sm text-[#5F7D70]">
                       {field.label}
+                      {field.group && (
+                        <span className="ml-2 rounded-full bg-[#EAF4EE] px-2 py-0.5 text-[10px] font-medium text-[#2F7866]">
+                          {field.group}
+                        </span>
+                      )}
                     </label>
                     <select
                       value={mappingDraft[field.key] ?? ""}
@@ -2306,11 +2412,13 @@ function MiniCount({ label, value }: { label: string; value: number }) {
 }
 
 
-function formatFileType(type: string) {
+function formatFileType(type?: string | null) {
+  if (!type) return "Unknown file type";
   return fileTypeOptions.find((option) => option.value === type)?.label ?? formatIssueType(type);
 }
 
-function formatIssueType(type: string) {
+function formatIssueType(type?: string | null) {
+  if (!type) return "Unknown";
   return type
     .split("_")
     .filter(Boolean)

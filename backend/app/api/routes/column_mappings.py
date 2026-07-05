@@ -42,6 +42,7 @@ def get_column_mapping(file_id: int, db: Session = Depends(get_db)):
     return {
         "file_id": uploaded_file.id,
         "workspace_id": uploaded_file.workspace_id,
+        "file_type": uploaded_file.file_type,
         "available_columns": preview["available_columns"],
         "detected_mapping": preview["detected_mapping"],
         "saved_mapping": saved.mapping if saved else None,
