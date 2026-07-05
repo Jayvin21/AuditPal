@@ -73,6 +73,7 @@ type AuditRunResponse = {
     book_records?: number;
     gstr_2b_records?: number;
     checked_records?: number;
+    ledger_records_checked?: number;
     unchecked_records: number;
     issues_found: number;
     risk_counts?: Record<string, number>;
@@ -431,6 +432,25 @@ export default function WorkspaceDetailPage() {
   }
 
 
+
+  async function runLedgerScrutiny() {
+    setBusy(true);
+    setStatusMessage("Running ledger scrutiny...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-ledger-scrutiny`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("Ledger scrutiny completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Ledger scrutiny failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runGstReconciliation() {
     setBusy(true);
     setStatusMessage("Running GST reconciliation...");
@@ -715,6 +735,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runLedgerScrutiny={runLedgerScrutiny}
                 runGstReconciliation={runGstReconciliation}
                 runBankReconciliation={runBankReconciliation}
               />
@@ -1202,6 +1223,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runLedgerScrutiny,
   runGstReconciliation,
   runBankReconciliation,
 }: {
@@ -1216,6 +1238,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runLedgerScrutiny: () => void;
   runGstReconciliation: () => void;
   runBankReconciliation: () => void;
 }) {
@@ -1247,6 +1270,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "ledger",
+      label: "Ledger Scrutiny",
+      description: "Reviews ledger-style exports for suspense accounts, manual journals, year-end entries, cash risks, loans/advances, and repeated posting patterns.",
+      run: runLedgerScrutiny,
     },
     {
       key: "gst",
@@ -1281,6 +1310,7 @@ function AuditSection({
     coverageSource?.purchase_records_checked ??
     coverageSource?.sales_records_checked ??
     coverageSource?.expense_records_checked ??
+    coverageSource?.ledger_records_checked ??
     0;
 
   return (
@@ -1288,12 +1318,13 @@ function AuditSection({
       title="Audit Runs"
       subtitle="Run audit modules, revisit previous runs, and continue review where you left off."
     >
-      <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
-        <Card>
-          <div className="mb-5 flex items-center gap-2">
-            <Play size={18} className="text-[#358873]" />
-            <h2 className="font-medium">Run audit module</h2>
-          </div>
+      <div className="grid items-start gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+        <div className="h-fit">
+          <Card>
+            <div className="mb-5 flex items-center gap-2">
+              <Play size={18} className="text-[#358873]" />
+              <h2 className="font-medium">Run audit module</h2>
+            </div>
 
           <label className="mb-2 block text-sm text-[#5F7D70]">
             Audit module
@@ -1332,8 +1363,9 @@ function AuditSection({
             >
               Run {selected.label}
             </button>
-          </div>
-        </Card>
+            </div>
+          </Card>
+        </div>
 
         <div className="space-y-6">
           <Card>
@@ -1893,7 +1925,9 @@ function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "gst_reconciliation") return "GST Reconciliation";
+  if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "bank_reconciliation") return "Bank Reconciliation";
   return type;
 }
@@ -2029,7 +2063,8 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
 
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
-  if (type.includes("expense") || type.includes("gl") || type.includes("ledger_vouchers")) return "expense";
+  if (type.includes("expense")) return "expense";
+  if (type.includes("trial_balance") || type.includes("sap_gl") || type.includes("ledger_vouchers")) return "ledger";
   if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";
   if (type.includes("purchase") || type.includes("vendor")) return "purchase";
 

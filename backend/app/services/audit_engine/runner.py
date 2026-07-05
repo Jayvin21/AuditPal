@@ -12,6 +12,7 @@ from app.services.audit_engine.checks.basic_purchase_checks import run_basic_pur
 from app.services.audit_engine.checks.expense_checks import run_expense_checks
 from app.services.audit_engine.checks.sales_checks import run_sales_checks
 from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks
+from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -66,6 +67,17 @@ LEDGER_FILE_TYPES = {
     "bank_ledger",
     "ledger",
     "tally_bank_book",
+}
+
+
+LEDGER_SCRUTINY_FILE_TYPES = {
+    "ledger",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "cash_bank_ledger",
+    "bank_ledger",
+    "trial_balance",
 }
 
 
@@ -430,6 +442,82 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "expense_records_checked": len(expense_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    ledger_records = [
+        record for record in records
+        if record.record_type.lower() in LEDGER_SCRUTINY_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not ledger_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="ledger_scrutiny",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "Ledger scrutiny needs ledger-style records such as Tally Ledger Vouchers, SAP G/L Line Items, Expense Ledger, or Trial Balance.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "ledger_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_ledger_scrutiny_checks(ledger_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="ledger_scrutiny",
+        status="completed",
+        total_records=len(ledger_records),
+        checked_records=len(ledger_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(ledger_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Ledger scrutiny completed using uploaded ledger records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "ledger_records_checked": len(ledger_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),

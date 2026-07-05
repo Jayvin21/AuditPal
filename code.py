@@ -13,13 +13,19 @@ CHECKS_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------
-# 1. GST reconciliation checks
+# 1. Ledger scrutiny checks
 # ----------------------------------------------------
 
-(CHECKS_DIR / "gst_reco_checks.py").write_text(
+(CHECKS_DIR / "ledger_scrutiny_checks.py").write_text(
 r'''from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+
+
+SUSPENSE_KEYWORDS = ["suspense", "temporary", "dummy", "unclassified", "unknown"]
+CASH_KEYWORDS = ["cash", "petty cash"]
+LOAN_ADVANCE_KEYWORDS = ["loan", "advance", "deposit", "unsecured loan", "director loan"]
+MANUAL_ENTRY_KEYWORDS = ["journal", "manual", "jv", "adjustment", "provision", "rectification"]
 
 
 def _norm(value):
@@ -28,12 +34,8 @@ def _norm(value):
     return str(value).strip()
 
 
-def _clean_id(value):
-    return _norm(value).replace(" ", "").replace("-", "").replace("/", "").lower()
-
-
-def _clean_gstin(value):
-    return _norm(value).upper().replace(" ", "")
+def _lower(value):
+    return _norm(value).lower()
 
 
 def _amount(value):
@@ -58,37 +60,58 @@ def _date_string(value):
     return str(value)
 
 
-def _key(record):
-    doc = _clean_id(getattr(record, "document_id", None))
-    gstin = _clean_gstin(getattr(record, "gstin", None))
-    return (doc, gstin)
+def _is_year_end(value):
+    text = _date_string(value)
+    return any(marker in text for marker in ["03-31", "31-03", "31/03", "2025-03-31", "2026-03-31"])
 
 
-def _display(record):
-    return {
-        "record_id": getattr(record, "id", None),
-        "source_row": getattr(record, "source_row", None),
-        "document_id": getattr(record, "document_id", None),
-        "party_name": getattr(record, "party_name", None),
-        "transaction_date": _date_string(getattr(record, "transaction_date", None)),
-        "amount": getattr(record, "amount", None),
-        "gstin": getattr(record, "gstin", None),
-        "record_type": getattr(record, "record_type", None),
-    }
+def _raw(record, *keys):
+    raw = getattr(record, "raw_data", None) or {}
+    for key in keys:
+        if key in raw and raw[key] not in [None, ""]:
+            return raw[key]
+    return None
+
+
+def _description(record):
+    return (
+        _raw(record, "description", "narration", "Narration", "Description", "Particulars", "Text")
+        or getattr(record, "description", None)
+        or ""
+    )
+
+
+def _voucher_type(record):
+    return _raw(record, "Voucher Type", "voucher_type", "Document Type", "document_type", "Entry Type") or ""
+
+
+def _ledger_name(record):
+    return (
+        getattr(record, "party_name", None)
+        or _raw(record, "Ledger Name", "G/L Account", "GL Account", "Account", "Particulars", "Cost Center")
+        or ""
+    )
+
+
+def _money(value):
+    amount = _amount(value)
+    if amount is None:
+        return ""
+    return f"₹{amount:,.0f}"
 
 
 def _title(base, record):
     bits = []
     doc = _norm(getattr(record, "document_id", None))
-    party = _norm(getattr(record, "party_name", None))
-    gstin = _norm(getattr(record, "gstin", None))
+    ledger = _norm(_ledger_name(record))
+    amount = _money(getattr(record, "amount", None))
 
     if doc:
         bits.append(doc)
-    if party:
-        bits.append(party)
-    if gstin:
-        bits.append(gstin)
+    if ledger:
+        bits.append(ledger)
+    if amount:
+        bits.append(amount)
 
     if not bits:
         return base
@@ -97,7 +120,19 @@ def _title(base, record):
 
 
 def _finding(record, finding_type, risk_level, title, description, extra=None):
-    evidence = _display(record)
+    evidence = {
+        "record_id": getattr(record, "id", None),
+        "source_row": getattr(record, "source_row", None),
+        "document_id": getattr(record, "document_id", None),
+        "ledger_name": _ledger_name(record),
+        "party_name": getattr(record, "party_name", None),
+        "transaction_date": _date_string(getattr(record, "transaction_date", None)),
+        "amount": getattr(record, "amount", None),
+        "description": _description(record),
+        "voucher_type": _voucher_type(record),
+        "record_type": getattr(record, "record_type", None),
+    }
+
     if extra:
         evidence.update(extra)
 
@@ -111,191 +146,173 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
     }
 
 
-def _group_finding(records, finding_type, risk_level, title, description, extra=None):
-    first = records[0]
-    evidence = {
-        "duplicate_count": len(records),
-        "records": [_display(record) for record in records],
-        "document_id": getattr(first, "document_id", None),
-        "party_name": getattr(first, "party_name", None),
-        "gstin": getattr(first, "gstin", None),
-        "source_rows": [getattr(record, "source_row", None) for record in records],
-    }
-
-    if extra:
-        evidence.update(extra)
-
-    return {
-        "source_record_id": getattr(first, "id", None),
-        "finding_type": finding_type,
-        "risk_level": risk_level,
-        "title": _title(title, first),
-        "description": description,
-        "evidence": evidence,
-    }
-
-
-def run_gst_reconciliation_checks(book_records, gstr_2b_records, amount_tolerance=5.0):
+def run_ledger_scrutiny_checks(records):
     findings = []
+    voucher_index = defaultdict(list)
+    ledger_amount_date_index = defaultdict(list)
 
-    book_index = defaultdict(list)
-    portal_index = defaultdict(list)
-
-    for record in book_records:
+    for record in records:
         document_id = _norm(getattr(record, "document_id", None))
-        gstin = _norm(getattr(record, "gstin", None))
+        ledger_name = _norm(_ledger_name(record))
+        ledger_lower = ledger_name.lower()
+        description = _description(record)
+        description_lower = description.lower()
+        voucher_type = _voucher_type(record)
+        voucher_type_lower = voucher_type.lower()
         amount = _amount(getattr(record, "amount", None))
+        txn_date = getattr(record, "transaction_date", None)
+        txn_date_text = _date_string(txn_date)
+
+        combined_text = " ".join([ledger_lower, description_lower, voucher_type_lower])
+
+        if document_id:
+            voucher_index[document_id.lower()].append(record)
+
+        if ledger_name and amount is not None and txn_date_text:
+            ledger_amount_date_index[(ledger_lower, round(abs(amount), 2), txn_date_text)].append(record)
 
         if not document_id:
             findings.append(_finding(
                 record,
-                "books_missing_invoice_number",
-                "high",
-                "Books invoice missing invoice number",
-                "Books purchase/ITC entry does not have a usable invoice number, so it cannot be reliably matched with GSTR-2B.",
+                "missing_ledger_voucher_number",
+                "medium",
+                "Missing ledger voucher/reference number",
+                "Ledger entry has no voucher, document, reference, or journal number.",
             ))
 
-        if not gstin:
+        if not ledger_name:
             findings.append(_finding(
                 record,
-                "books_missing_supplier_gstin",
-                "high",
-                "Books invoice missing supplier GSTIN",
-                "Books purchase/ITC entry does not have supplier GSTIN, so GST reconciliation is weak.",
+                "missing_ledger_name",
+                "medium",
+                "Missing ledger/account name",
+                "Ledger entry does not identify the ledger, account, party, cost center, or G/L account.",
             ))
 
         if amount is None:
             findings.append(_finding(
                 record,
-                "books_missing_taxable_or_invoice_amount",
-                "medium",
-                "Books invoice missing amount",
-                "Books purchase/ITC entry does not have a usable amount for GST reconciliation.",
-            ))
-
-        key = _key(record)
-        if key != ("", ""):
-            book_index[key].append(record)
-
-    for record in gstr_2b_records:
-        document_id = _norm(getattr(record, "document_id", None))
-        gstin = _norm(getattr(record, "gstin", None))
-        amount = _amount(getattr(record, "amount", None))
-
-        if not document_id:
-            findings.append(_finding(
-                record,
-                "gstr_2b_missing_invoice_number",
-                "medium",
-                "GSTR-2B row missing invoice number",
-                "GSTR-2B row does not have a usable invoice number.",
-            ))
-
-        if not gstin:
-            findings.append(_finding(
-                record,
-                "gstr_2b_missing_supplier_gstin",
-                "medium",
-                "GSTR-2B row missing supplier GSTIN",
-                "GSTR-2B row does not have a usable supplier GSTIN.",
-            ))
-
-        if amount is None:
-            findings.append(_finding(
-                record,
-                "gstr_2b_missing_taxable_or_invoice_amount",
-                "medium",
-                "GSTR-2B row missing amount",
-                "GSTR-2B row does not have a usable taxable/invoice amount.",
-            ))
-
-        key = _key(record)
-        if key != ("", ""):
-            portal_index[key].append(record)
-
-    for key, records in book_index.items():
-        if len(records) > 1:
-            findings.append(_group_finding(
-                records,
-                "duplicate_invoice_in_books",
+                "missing_ledger_amount",
                 "high",
-                "Duplicate GST invoice in books",
-                "Same invoice number and supplier GSTIN appears multiple times in books. Check duplicate ITC booking.",
-                {"match_key": key},
+                "Missing ledger amount",
+                "Ledger entry does not contain a usable amount.",
             ))
-
-    for key, records in portal_index.items():
-        if len(records) > 1:
-            findings.append(_group_finding(
-                records,
-                "duplicate_invoice_in_gstr_2b",
-                "medium",
-                "Duplicate GST invoice in GSTR-2B",
-                "Same invoice number and supplier GSTIN appears multiple times in GSTR-2B export.",
-                {"match_key": key},
-            ))
-
-    for key, books in book_index.items():
-        if key not in portal_index:
-            for record in books:
-                findings.append(_finding(
-                    record,
-                    "itc_in_books_not_in_gstr_2b",
-                    "high",
-                    "ITC in books not found in GSTR-2B",
-                    "Purchase/ITC entry exists in books but matching supplier GSTIN and invoice number was not found in GSTR-2B.",
-                    {"match_key": key},
-                ))
             continue
 
-        portal_records = portal_index[key]
+        if abs(amount) >= 100000:
+            findings.append(_finding(
+                record,
+                "high_value_ledger_entry",
+                "high",
+                "High-value ledger entry",
+                "Ledger entry is above ₹1,00,000 and should be verified with supporting documents and approval trail.",
+                {"amount": amount},
+            ))
 
-        for book_record in books:
-            book_amount = _amount(getattr(book_record, "amount", None))
-            if book_amount is None:
-                continue
+        if abs(amount) >= 1000 and abs(amount) % 1000 == 0:
+            findings.append(_finding(
+                record,
+                "round_number_ledger_entry",
+                "low",
+                "Round-number ledger entry",
+                "Ledger entry has a round amount. This can be normal, but should be reviewed for manual or estimated postings.",
+                {"amount": amount},
+            ))
 
-            closest_portal = None
-            closest_diff = None
+        if _is_year_end(txn_date):
+            findings.append(_finding(
+                record,
+                "year_end_ledger_entry",
+                "medium",
+                "Year-end ledger entry",
+                "Ledger entry was posted near financial year end. Review cut-off, provisioning, reversal, and supporting documents.",
+                {"transaction_date": txn_date_text},
+            ))
 
-            for portal_record in portal_records:
-                portal_amount = _amount(getattr(portal_record, "amount", None))
-                if portal_amount is None:
-                    continue
+        if any(keyword in combined_text for keyword in SUSPENSE_KEYWORDS):
+            findings.append(_finding(
+                record,
+                "suspense_or_temporary_account_activity",
+                "high",
+                "Suspense/temporary account activity",
+                "Ledger entry appears to involve suspense, temporary, dummy, unknown, or unclassified accounts.",
+                {"matched_text": combined_text},
+            ))
 
-                diff = abs(abs(book_amount) - abs(portal_amount))
+        if any(keyword in combined_text for keyword in MANUAL_ENTRY_KEYWORDS):
+            findings.append(_finding(
+                record,
+                "manual_or_journal_entry",
+                "medium",
+                "Manual/journal entry indicator",
+                "Ledger entry appears to be a manual, journal, adjustment, provision, or rectification posting.",
+                {"voucher_type": voucher_type, "description": description},
+            ))
 
-                if closest_diff is None or diff < closest_diff:
-                    closest_diff = diff
-                    closest_portal = portal_record
+        if any(keyword in combined_text for keyword in CASH_KEYWORDS) and abs(amount) >= 10000:
+            findings.append(_finding(
+                record,
+                "high_value_cash_ledger_activity",
+                "high",
+                "High-value cash ledger activity",
+                "Cash or petty-cash ledger activity above ₹10,000 should be reviewed for tax/audit sensitivity and supporting documents.",
+                {"amount": amount},
+            ))
 
-            if closest_portal is not None and closest_diff is not None and closest_diff > amount_tolerance:
-                findings.append(_finding(
-                    book_record,
-                    "gst_amount_mismatch_books_vs_2b",
-                    "medium",
-                    "GST reconciliation amount mismatch",
-                    "Invoice exists in both books and GSTR-2B, but amount differs beyond tolerance.",
-                    {
-                        "match_key": key,
-                        "books_amount": book_amount,
-                        "gstr_2b_amount": _amount(getattr(closest_portal, "amount", None)),
-                        "difference": round(closest_diff, 2),
-                        "gstr_2b_record": _display(closest_portal),
-                    },
-                ))
+        if any(keyword in combined_text for keyword in LOAN_ADVANCE_KEYWORDS) and abs(amount) >= 50000:
+            findings.append(_finding(
+                record,
+                "loan_or_advance_movement",
+                "medium",
+                "Loan/advance/deposit ledger movement",
+                "Ledger entry appears to involve loans, advances, deposits, or unsecured loan movement. Verify agreement, confirmation, and classification.",
+                {"amount": amount},
+            ))
 
-    for key, portal_records in portal_index.items():
-        if key not in book_index:
-            for record in portal_records:
-                findings.append(_finding(
-                    record,
-                    "gstr_2b_invoice_not_booked",
-                    "medium",
-                    "GSTR-2B invoice not found in books",
-                    "Invoice exists in GSTR-2B but matching books entry was not found. Check if purchase/ITC was missed or intentionally not booked.",
-                    {"match_key": key},
-                ))
+        if not description or len(description.strip()) < 4:
+            findings.append(_finding(
+                record,
+                "missing_or_weak_ledger_narration",
+                "low",
+                "Missing or weak ledger narration",
+                "Ledger entry has no meaningful narration, text, or description.",
+            ))
+
+    for voucher, duplicate_records in voucher_index.items():
+        if len(duplicate_records) > 1:
+            first = duplicate_records[0]
+            findings.append(_finding(
+                first,
+                "duplicate_ledger_voucher_reference",
+                "medium",
+                "Duplicate ledger voucher/reference",
+                "Same voucher/reference appears more than once in ledger data. Review whether this is valid multi-line accounting or duplicate posting.",
+                {
+                    "voucher": voucher,
+                    "duplicate_count": len(duplicate_records),
+                    "source_rows": [getattr(record, "source_row", None) for record in duplicate_records],
+                    "record_ids": [getattr(record, "id", None) for record in duplicate_records],
+                },
+            ))
+
+    for key, repeated_records in ledger_amount_date_index.items():
+        if len(repeated_records) > 1:
+            first = repeated_records[0]
+            ledger_name, amount, txn_date = key
+            findings.append(_finding(
+                first,
+                "repeated_ledger_pattern",
+                "medium",
+                "Repeated ledger amount/date pattern",
+                "Same ledger, same amount, and same date appears multiple times. Review for duplicate posting or repeated adjustment.",
+                {
+                    "ledger_name": ledger_name,
+                    "amount": amount,
+                    "transaction_date": txn_date,
+                    "duplicate_count": len(repeated_records),
+                    "source_rows": [getattr(record, "source_row", None) for record in repeated_records],
+                },
+            ))
 
     return findings
 ''',
@@ -308,62 +325,58 @@ encoding="utf-8",
 
 runner = RUNNER.read_text(encoding="utf-8")
 
-if "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks" not in runner:
-    runner = runner.replace(
-        "from app.services.audit_engine.checks.sales_checks import run_sales_checks",
-        "from app.services.audit_engine.checks.sales_checks import run_sales_checks\nfrom app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks",
-    )
-
-if "GST_BOOK_FILE_TYPES" not in runner:
-    insert_after = '''SALES_FILE_TYPES = {
-    "sales_register",
-    "generic_sales_register",
-    "sales",
-    "sap_customer_line_items",
-}
-'''
-    gst_types = insert_after + '''
-
-GST_BOOK_FILE_TYPES = {
-    "purchase_register",
-    "purchase",
-    "purchase_ledger",
-    "tally_purchase_register",
-    "sap_vendor_line_items",
-}
-
-GSTR_2B_FILE_TYPES = {
-    "gstr_2b",
-    "gst_2b",
-    "gstr2b",
-}
-'''
-    if insert_after in runner:
-        runner = runner.replace(insert_after, gst_types)
+if "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks" not in runner:
+    if "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks" in runner:
+        runner = runner.replace(
+            "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks",
+            "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks\nfrom app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
+        )
     else:
         runner = runner.replace(
-            "BANK_FILE_TYPES = {",
-            '''GST_BOOK_FILE_TYPES = {
-    "purchase_register",
-    "purchase",
-    "purchase_ledger",
-    "tally_purchase_register",
-    "sap_vendor_line_items",
-}
-
-GSTR_2B_FILE_TYPES = {
-    "gstr_2b",
-    "gst_2b",
-    "gstr2b",
-}
-
-BANK_FILE_TYPES = {''',
+            "from app.services.audit_engine.checks.sales_checks import run_sales_checks",
+            "from app.services.audit_engine.checks.sales_checks import run_sales_checks\nfrom app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
         )
 
-if "def run_gst_reconciliation" not in runner:
-    gst_function = r'''
+if "LEDGER_SCRUTINY_FILE_TYPES" not in runner:
+    marker = '''LEDGER_FILE_TYPES = {
+    "cash_bank_ledger",
+    "bank_ledger",
+    "ledger",
+    "tally_bank_book",
+}
+'''
+    addition = marker + '''
 
-def run_gst_reconciliation(workspace_id: int, db: Session) -> dict:
+LEDGER_SCRUTINY_FILE_TYPES = {
+    "ledger",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "cash_bank_ledger",
+    "bank_ledger",
+    "trial_balance",
+}
+'''
+    if marker in runner:
+        runner = runner.replace(marker, addition)
+    else:
+        runner += '''
+
+LEDGER_SCRUTINY_FILE_TYPES = {
+    "ledger",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "cash_bank_ledger",
+    "bank_ledger",
+    "trial_balance",
+}
+'''
+
+if "def run_ledger_scrutiny" not in runner:
+    ledger_function = r'''
+
+def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
     parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
 
     records = (
@@ -372,22 +385,17 @@ def run_gst_reconciliation(workspace_id: int, db: Session) -> dict:
         .all()
     )
 
-    book_records = [
+    ledger_records = [
         record for record in records
-        if record.record_type.lower() in GST_BOOK_FILE_TYPES
-    ]
-
-    gstr_2b_records = [
-        record for record in records
-        if record.record_type.lower() in GSTR_2B_FILE_TYPES
+        if record.record_type.lower() in LEDGER_SCRUTINY_FILE_TYPES
     ]
 
     clear_findings(workspace_id, db)
 
-    if not book_records or not gstr_2b_records:
+    if not ledger_records:
         audit_run = AuditRun(
             workspace_id=workspace_id,
-            audit_type="gst_reconciliation",
+            audit_type="ledger_scrutiny",
             status="completed_with_limitations",
             total_records=len(records),
             checked_records=0,
@@ -401,29 +409,26 @@ def run_gst_reconciliation(workspace_id: int, db: Session) -> dict:
         return {
             "audit_run_id": audit_run.id,
             "status": audit_run.status,
-            "message": "GST reconciliation needs one books purchase file and one GSTR-2B file.",
+            "message": "Ledger scrutiny needs ledger-style records such as Tally Ledger Vouchers, SAP G/L Line Items, Expense Ledger, or Trial Balance.",
             "parse_summary": parse_summary,
             "coverage": {
                 "total_records": len(records),
-                "book_records": len(book_records),
-                "gstr_2b_records": len(gstr_2b_records),
-                "checked_records": 0,
+                "ledger_records_checked": 0,
                 "unchecked_records": len(records),
                 "issues_found": 0,
             },
         }
 
-    finding_payloads = run_gst_reconciliation_checks(book_records, gstr_2b_records)
-    checked_records = len(book_records) + len(gstr_2b_records)
+    finding_payloads = run_ledger_scrutiny_checks(ledger_records)
 
     audit_run = AuditRun(
         workspace_id=workspace_id,
-        audit_type="gst_reconciliation",
+        audit_type="ledger_scrutiny",
         status="completed",
-        total_records=checked_records,
-        checked_records=checked_records,
+        total_records=len(ledger_records),
+        checked_records=len(ledger_records),
         issues_found=len(finding_payloads),
-        unchecked_records=max(0, len(records) - checked_records),
+        unchecked_records=max(0, len(records) - len(ledger_records)),
     )
 
     db.add(audit_run)
@@ -435,23 +440,23 @@ def run_gst_reconciliation(workspace_id: int, db: Session) -> dict:
     return {
         "audit_run_id": audit_run.id,
         "status": audit_run.status,
-        "message": "GST reconciliation completed using books and GSTR-2B records",
+        "message": "Ledger scrutiny completed using uploaded ledger records",
         "parse_summary": parse_summary,
         "coverage": {
             "total_records": len(records),
-            "book_records": len(book_records),
-            "gstr_2b_records": len(gstr_2b_records),
-            "checked_records": checked_records,
+            "ledger_records_checked": len(ledger_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
         },
     }
 '''
-    if "\n\ndef run_bank_reconciliation" in runner:
-        runner = runner.replace("\n\ndef run_bank_reconciliation", gst_function + "\n\ndef run_bank_reconciliation")
+    if "\n\ndef run_gst_reconciliation" in runner:
+        runner = runner.replace("\n\ndef run_gst_reconciliation", ledger_function + "\n\ndef run_gst_reconciliation")
+    elif "\n\ndef run_bank_reconciliation" in runner:
+        runner = runner.replace("\n\ndef run_bank_reconciliation", ledger_function + "\n\ndef run_bank_reconciliation")
     else:
-        runner += gst_function
+        runner += ledger_function
 
 RUNNER.write_text(runner, encoding="utf-8")
 
@@ -461,26 +466,38 @@ RUNNER.write_text(runner, encoding="utf-8")
 
 routes = AUDIT_RUNS.read_text(encoding="utf-8")
 
-if "run_gst_reconciliation" not in routes:
-    routes = routes.replace(
-        "run_expense_audit,",
-        "run_expense_audit,\n    run_gst_reconciliation,",
-    )
+if "run_ledger_scrutiny" not in routes:
+    if "run_gst_reconciliation," in routes:
+        routes = routes.replace(
+            "run_gst_reconciliation,",
+            "run_gst_reconciliation,\n    run_ledger_scrutiny,",
+        )
+    else:
+        routes = routes.replace(
+            "run_expense_audit,",
+            "run_expense_audit,\n    run_ledger_scrutiny,",
+        )
 
-if 'run-gst-reconciliation' not in routes:
+if 'run-ledger-scrutiny' not in routes:
     endpoint = r'''
 
-@router.post("/{workspace_id}/run-gst-reconciliation")
-def run_real_gst_reconciliation(workspace_id: int, db: Session = Depends(get_db)):
+@router.post("/{workspace_id}/run-ledger-scrutiny")
+def run_real_ledger_scrutiny(workspace_id: int, db: Session = Depends(get_db)):
     try:
-        return run_gst_reconciliation(workspace_id=workspace_id, db=db)
+        return run_ledger_scrutiny(workspace_id=workspace_id, db=db)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"GST reconciliation failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=f"Ledger scrutiny failed: {str(exc)}")
 '''
-    routes = routes.replace(
-        '\n\n@router.post("/{workspace_id}/run-bank-reconciliation")',
-        endpoint + '\n\n@router.post("/{workspace_id}/run-bank-reconciliation")',
-    )
+    if '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")' in routes:
+        routes = routes.replace(
+            '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")',
+            endpoint + '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")',
+        )
+    else:
+        routes = routes.replace(
+            '\n\n@router.post("/{workspace_id}/run-bank-reconciliation")',
+            endpoint + '\n\n@router.post("/{workspace_id}/run-bank-reconciliation")',
+        )
 
 AUDIT_RUNS.write_text(routes, encoding="utf-8")
 
@@ -490,83 +507,101 @@ AUDIT_RUNS.write_text(routes, encoding="utf-8")
 
 page = FRONTEND.read_text(encoding="utf-8")
 
-# Add coverage type hints
-if "gstr_2b_records?: number;" not in page:
+if "ledger_records_checked?: number;" not in page:
     page = page.replace(
-        "ledger_records?: number;",
-        "ledger_records?: number;\n    book_records?: number;\n    gstr_2b_records?: number;",
+        "checked_records?: number;",
+        "checked_records?: number;\n    ledger_records_checked?: number;",
     )
 
-# Add runGstReconciliation function before bank reconciliation
-if "async function runGstReconciliation()" not in page:
-    gst_fn = r'''
-  async function runGstReconciliation() {
+if "async function runLedgerScrutiny()" not in page:
+    ledger_fn = r'''
+  async function runLedgerScrutiny() {
     setBusy(true);
-    setStatusMessage("Running GST reconciliation...");
+    setStatusMessage("Running ledger scrutiny...");
 
     try {
-      const res = await api.post(`/audit-runs/${workspaceId}/run-gst-reconciliation`);
+      const res = await api.post(`/audit-runs/${workspaceId}/run-ledger-scrutiny`);
       setAuditSummary(res.data);
       setSelectedAuditRunId(res.data.audit_run_id);
-      setStatusMessage("GST reconciliation completed.");
+      setStatusMessage("Ledger scrutiny completed.");
       await refreshAll();
       setActiveSection("findings");
     } catch {
-      setStatusMessage("GST reconciliation failed.");
+      setStatusMessage("Ledger scrutiny failed.");
     } finally {
       setBusy(false);
     }
   }
 
 '''
-    page = page.replace("  async function runBankReconciliation()", gst_fn + "  async function runBankReconciliation()")
+    if "  async function runGstReconciliation()" in page:
+        page = page.replace("  async function runGstReconciliation()", ledger_fn + "  async function runGstReconciliation()")
+    else:
+        page = page.replace("  async function runBankReconciliation()", ledger_fn + "  async function runBankReconciliation()")
 
-# Pass prop into AuditSection call
-if "runGstReconciliation={runGstReconciliation}" not in page:
+if "runLedgerScrutiny={runLedgerScrutiny}" not in page:
+    page = page.replace(
+        "runExpenseAudit={runExpenseAudit}\n                runGstReconciliation={runGstReconciliation}",
+        "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}\n                runGstReconciliation={runGstReconciliation}",
+    )
     page = page.replace(
         "runExpenseAudit={runExpenseAudit}\n                runBankReconciliation={runBankReconciliation}",
-        "runExpenseAudit={runExpenseAudit}\n                runGstReconciliation={runGstReconciliation}\n                runBankReconciliation={runBankReconciliation}",
+        "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}\n                runBankReconciliation={runBankReconciliation}",
     )
 
-# Add AuditSection destructuring prop
-if "runGstReconciliation," not in page:
+if "runLedgerScrutiny," not in page:
+    page = page.replace(
+        "runExpenseAudit,\n  runGstReconciliation,",
+        "runExpenseAudit,\n  runLedgerScrutiny,\n  runGstReconciliation,",
+    )
     page = page.replace(
         "runExpenseAudit,\n  runBankReconciliation,",
-        "runExpenseAudit,\n  runGstReconciliation,\n  runBankReconciliation,",
+        "runExpenseAudit,\n  runLedgerScrutiny,\n  runBankReconciliation,",
     )
 
-# Add AuditSection prop type
-if "runGstReconciliation: () => void;" not in page:
+if "runLedgerScrutiny: () => void;" not in page:
+    page = page.replace(
+        "runExpenseAudit: () => void;\n  runGstReconciliation: () => void;",
+        "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;\n  runGstReconciliation: () => void;",
+    )
     page = page.replace(
         "runExpenseAudit: () => void;\n  runBankReconciliation: () => void;",
-        "runExpenseAudit: () => void;\n  runGstReconciliation: () => void;\n  runBankReconciliation: () => void;",
+        "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;\n  runBankReconciliation: () => void;",
     )
 
-# Add module option after expense
-if 'key: "gst"' not in page:
+if 'key: "ledger"' not in page:
     expense_option = r'''    {
       key: "expense",
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
     },'''
-    gst_option = expense_option + r'''
+    ledger_option = expense_option + r'''
     {
-      key: "gst",
-      label: "GST Reconciliation",
-      description: "Compares books purchase/ITC entries with GSTR-2B and flags missing invoices, amount mismatches, and duplicate ITC risk.",
-      run: runGstReconciliation,
+      key: "ledger",
+      label: "Ledger Scrutiny",
+      description: "Reviews ledger-style exports for suspense accounts, manual journals, year-end entries, cash risks, loans/advances, and repeated posting patterns.",
+      run: runLedgerScrutiny,
     },'''
-    page = page.replace(expense_option, gst_option)
+    page = page.replace(expense_option, ledger_option)
 
-# Format audit type
-if 'if (type === "gst_reconciliation") return "GST Reconciliation";' not in page:
+if 'if (type === "ledger_scrutiny") return "Ledger Scrutiny";' not in page:
+    page = page.replace(
+        'if (type === "gst_reconciliation") return "GST Reconciliation";',
+        'if (type === "ledger_scrutiny") return "Ledger Scrutiny";\n  if (type === "gst_reconciliation") return "GST Reconciliation";',
+    )
     page = page.replace(
         'if (type === "bank_reconciliation") return "Bank Reconciliation";',
-        'if (type === "gst_reconciliation") return "GST Reconciliation";\n  if (type === "bank_reconciliation") return "Bank Reconciliation";',
+        'if (type === "ledger_scrutiny") return "Ledger Scrutiny";\n  if (type === "bank_reconciliation") return "Bank Reconciliation";',
     )
 
-# Infer GST module
+# checked records should understand ledger_records_checked
+page = page.replace(
+    "coverageSource?.expense_records_checked ??\n    0;",
+    "coverageSource?.expense_records_checked ??\n    coverageSource?.ledger_records_checked ??\n    0;",
+)
+
+# Infer ledger module
 page = re.sub(
     r"function inferRecommendedAuditModule\(files\?: UploadedFile\[\]\) \{[\s\S]*?\n\}",
     r'''function inferRecommendedAuditModule(files?: UploadedFile[]) {
@@ -581,7 +616,8 @@ page = re.sub(
 
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
-  if (type.includes("expense") || type.includes("gl") || type.includes("ledger_vouchers")) return "expense";
+  if (type.includes("expense")) return "expense";
+  if (type.includes("trial_balance") || type.includes("sap_gl") || type.includes("ledger_vouchers")) return "ledger";
   if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";
   if (type.includes("purchase") || type.includes("vendor")) return "purchase";
 
@@ -593,38 +629,31 @@ page = re.sub(
 FRONTEND.write_text(page, encoding="utf-8")
 
 # ----------------------------------------------------
-# 5. Sample files
+# 5. Sample ledger scrutiny data
 # ----------------------------------------------------
 
-(SAMPLE_DIR / "gst_books_purchase_edge_cases.csv").write_text(
-"""Invoice No,Invoice Date,Vendor Name,GSTIN,Taxable Value,Narration
-PB-001,01-04-2025,ABC Suppliers,27ABCDE1234F1Z5,10000,Matched invoice
-PB-002,03-04-2025,Missing In 2B Vendor,27ABCDE1234F1Z5,25000,Books ITC not in 2B
-PB-003,05-04-2025,Amount Mismatch Vendor,27ABCDE1234F1Z5,50000,Amount differs from 2B
-PB-004,07-04-2025,Duplicate Vendor,27ABCDE1234F1Z5,12000,Duplicate in books
-PB-004,07-04-2025,Duplicate Vendor,27ABCDE1234F1Z5,12000,Duplicate in books again
-,08-04-2025,No Invoice Vendor,27ABCDE1234F1Z5,8000,Missing invoice number
-PB-006,09-04-2025,No GSTIN Vendor,,15000,Missing supplier GSTIN
+(SAMPLE_DIR / "ledger_scrutiny_edge_cases.csv").write_text(
+"""Voucher No,Date,Ledger Name,Narration,Debit,Credit,Voucher Type
+JV-001,01-04-2025,Office Expense,Normal office expense,12000,0,Journal
+JV-002,15-04-2025,Suspense Account,Temporary adjustment pending classification,50000,0,Journal
+JV-003,20-04-2025,Petty Cash,Cash paid for repairs,25000,0,Payment
+JV-004,31-03-2026,Provision for Expenses,Year end provision entry,150000,0,Journal
+JV-005,31-03-2026,Director Loan,Unsecured loan movement,200000,0,Journal
+JV-006,10-05-2025,,Missing ledger name,10000,0,Journal
+,12-05-2025,Repairs,Missing voucher number,8000,0,Payment
+JV-008,14-05-2025,Misc Expense,,3000,0,Journal
+JV-009,20-05-2025,Unclassified Expense,Unknown classification entry,18000,0,Journal
+JV-010,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
+JV-011,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
+JV-011,22-05-2025,Office Expense,Duplicate voucher reference,7000,0,Journal
 """,
 encoding="utf-8",
 )
 
-(SAMPLE_DIR / "gstr_2b_edge_cases.csv").write_text(
-"""Invoice number,Invoice Date,Trade/Legal name,GSTIN of supplier,Taxable Value,Supply Type
-PB-001,01-04-2025,ABC Suppliers,27ABCDE1234F1Z5,10000,Regular
-PB-003,05-04-2025,Amount Mismatch Vendor,27ABCDE1234F1Z5,48000,Regular
-PB-005,10-04-2025,Only In 2B Vendor,27ABCDE1234F1Z5,30000,Regular
-PB-007,11-04-2025,Duplicate 2B Vendor,27ABCDE1234F1Z5,9000,Regular
-PB-007,11-04-2025,Duplicate 2B Vendor,27ABCDE1234F1Z5,9000,Regular duplicate
-""",
-encoding="utf-8",
-)
-
-print("GST Reconciliation module applied.")
+print("Ledger Scrutiny module applied.")
 print("Updated:")
-print(f"- {CHECKS_DIR / 'gst_reco_checks.py'}")
+print(f"- {CHECKS_DIR / 'ledger_scrutiny_checks.py'}")
 print(f"- {RUNNER}")
 print(f"- {AUDIT_RUNS}")
 print(f"- {FRONTEND}")
-print(f"- {SAMPLE_DIR / 'gst_books_purchase_edge_cases.csv'}")
-print(f"- {SAMPLE_DIR / 'gstr_2b_edge_cases.csv'}")
+print(f"- {SAMPLE_DIR / 'ledger_scrutiny_edge_cases.csv'}")

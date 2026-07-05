@@ -1,0 +1,13 @@
+Voucher No,Date,Ledger Name,Narration,Debit,Credit,Voucher Type
+JV-001,01-04-2025,Office Expense,Normal office expense,12000,0,Journal
+JV-002,15-04-2025,Suspense Account,Temporary adjustment pending classification,50000,0,Journal
+JV-003,20-04-2025,Petty Cash,Cash paid for repairs,25000,0,Payment
+JV-004,31-03-2026,Provision for Expenses,Year end provision entry,150000,0,Journal
+JV-005,31-03-2026,Director Loan,Unsecured loan movement,200000,0,Journal
+JV-006,10-05-2025,,Missing ledger name,10000,0,Journal
+,12-05-2025,Repairs,Missing voucher number,8000,0,Payment
+JV-008,14-05-2025,Misc Expense,,3000,0,Journal
+JV-009,20-05-2025,Unclassified Expense,Unknown classification entry,18000,0,Journal
+JV-010,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
+JV-011,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
+JV-011,22-05-2025,Office Expense,Duplicate voucher reference,7000,0,Journal
