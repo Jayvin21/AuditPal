@@ -880,7 +880,7 @@ export default function WorkspaceDetailPage() {
   });
 
   return (
-    <main className="relative min-h-screen bg-[#F6FBF8] text-[#17352E]">
+    <main className="relative min-h-screen overflow-hidden bg-[#F6FBF8] text-[#17352E]">
       <AmbientBackground />
 
       <div className="flex min-h-screen flex-col">
@@ -888,7 +888,7 @@ export default function WorkspaceDetailPage() {
 
         <div className="mx-auto grid w-full max-w-7xl flex-1 gap-6 px-6 py-6 lg:grid-cols-[260px_1fr]">
           <aside className="hidden lg:block">
-            <div className="sticky top-6 rounded-3xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur">
+            <div className="audit-sidebar-enter sticky top-6 rounded-3xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur">
               <div className="border-b border-[#D6E6DD] pb-4">
                 <p className="text-xs font-medium uppercase tracking-[0.2em] text-[#6B8E7F]">
                   Workspace
@@ -912,8 +912,8 @@ export default function WorkspaceDetailPage() {
                       onClick={() => setActiveSection(section.key)}
                       className={
                         active
-                          ? "flex w-full items-center gap-3 rounded-2xl bg-[#358873] px-4 py-3 text-left text-sm font-medium text-white shadow-sm"
-                          : "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium text-[#5F7D70] transition hover:bg-[#EDF6F0] hover:text-[#17352E]"
+                          ? "audit-active-pulse flex w-full items-center gap-3 rounded-2xl bg-[#358873] px-4 py-3 text-left text-sm font-medium text-white shadow-sm transition"
+                          : "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium text-[#5F7D70] transition hover:-translate-y-0.5 hover:bg-[#EDF6F0] hover:text-[#17352E]"
                       }
                     >
                       <Icon size={17} />
@@ -925,10 +925,10 @@ export default function WorkspaceDetailPage() {
             </div>
           </aside>
 
-          <section className="min-w-0">
+          <section className="audit-stage-enter min-w-0">
             <MobileSectionNav activeSection={activeSection} setActiveSection={setActiveSection} />
 
-            <header className="mb-5 rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">
+            <header className="audit-header-enter audit-card-motion mb-5 rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <Link
@@ -954,7 +954,7 @@ export default function WorkspaceDetailPage() {
               </div>
             </header>
 
-            <section className="mb-5 grid gap-4 md:grid-cols-4">
+            <section className="audit-metrics-enter mb-5 grid gap-4 md:grid-cols-4">
               <Metric label="Files" value={String(files.length)} />
               <Metric label="Records" value={String(records.length)} />
               <Metric label="High Risk" value={String(high)} />
@@ -962,13 +962,14 @@ export default function WorkspaceDetailPage() {
             </section>
 
             {statusMessage && (
-              <div className="mb-5 rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 text-sm text-[#5F7D70] shadow-sm backdrop-blur">
+              <div className="audit-status-enter mb-5 rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 text-sm text-[#5F7D70] shadow-sm backdrop-blur">
                 {statusMessage}
               </div>
             )}
 
             {activeSection === "overview" && (
-              <OverviewSection
+              <div key="overview" className="audit-section-enter">
+                <OverviewSection
                 nextAction={nextAction}
                 files={files.length}
                 mappedFiles={mappedFiles}
@@ -982,14 +983,18 @@ export default function WorkspaceDetailPage() {
                 confirmedIssues={confirmedIssues}
                 setActiveSection={setActiveSection}
               />
+              </div>
             )}
 
             {activeSection === "templates" && (
-              <ImportTemplatesSection />
+              <div key="templates" className="audit-section-enter">
+                <ImportTemplatesSection />
+              </div>
             )}
 
             {activeSection === "files" && (
-              <FilesSection
+              <div key="files" className="audit-section-enter">
+                <FilesSection
                 selectedFile={selectedFile}
                 fileType={fileType}
                 files={files}
@@ -1001,10 +1006,12 @@ export default function WorkspaceDetailPage() {
                 openMapping={openMapping}
                 setActiveSection={setActiveSection}
               />
+              </div>
             )}
 
             {activeSection === "mapping" && (
-              <MappingSection
+              <div key="mapping" className="audit-section-enter">
+                <MappingSection
                 busy={busy}
                 mappingPreview={mappingPreview}
                 mappingDraft={mappingDraft}
@@ -1012,10 +1019,12 @@ export default function WorkspaceDetailPage() {
                 saveMapping={saveMapping}
                 parseFiles={parseFiles}
               />
+              </div>
             )}
 
             {activeSection === "audit" && (
-              <AuditSection
+              <div key="audit" className="audit-section-enter">
+                <AuditSection
                 files={files}
                 auditRuns={auditRuns}
                 selectedAuditRunId={selectedAuditRunId}
@@ -1036,10 +1045,12 @@ export default function WorkspaceDetailPage() {
                 runGstReconciliation={runGstReconciliation}
                 runBankReconciliation={runBankReconciliation}
               />
+              </div>
             )}
 
             {activeSection === "findings" && (
-              <FindingsSection
+              <div key="findings" className="audit-section-enter">
+                <FindingsSection
                 findings={findings}
                 filteredFindings={filteredFindings}
                 findingTypes={findingTypes}
@@ -1069,22 +1080,29 @@ export default function WorkspaceDetailPage() {
                 exportCsv={exportCsv}
                 exportPdf={exportPdf}
               />
+              </div>
             )}
 
             {activeSection === "records" && (
-              <RecordsSection records={records} />
+              <div key="records" className="audit-section-enter">
+                <RecordsSection records={records} />
+              </div>
             )}
 
             {activeSection === "reports" && (
-              <ReportsSection
+              <div key="reports" className="audit-section-enter">
+                <ReportsSection
                 findings={findings.length}
                 exportCsv={exportCsv}
                 exportPdf={exportPdf}
               />
+              </div>
             )}
 
             {activeSection === "chat" && (
-              <AuditChatSection workspaceId={workspaceId} refreshAll={refreshAll} />
+              <div key="chat" className="audit-section-enter">
+                <AuditChatSection workspaceId={workspaceId} refreshAll={refreshAll} />
+              </div>
             )}
           </section>
         </div>
@@ -1095,7 +1113,7 @@ export default function WorkspaceDetailPage() {
 
 function TopNav() {
   return (
-    <div className="border-b border-[#C8DDD0] bg-white/78 backdrop-blur">
+    <div className="audit-nav-enter border-b border-[#C8DDD0] bg-white/78 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="text-xl font-semibold tracking-tight text-[#17352E]">
           AuditPal
@@ -1131,8 +1149,8 @@ function MobileSectionNav({
             onClick={() => setActiveSection(section.key)}
             className={
               activeSection === section.key
-                ? "rounded-xl bg-[#358873] px-4 py-2 text-sm font-medium text-white"
-                : "rounded-xl px-4 py-2 text-sm font-medium text-[#5F7D70]"
+                ? "rounded-xl bg-[#358873] px-4 py-2 text-sm font-medium text-white shadow-sm transition"
+                : "rounded-xl px-4 py-2 text-sm font-medium text-[#5F7D70] transition hover:bg-[#EDF6F0]"
             }
           >
             {section.label}
@@ -1435,7 +1453,7 @@ function FilesSection({
             <button
               onClick={uploadFile}
               disabled={busy}
-              className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+              className="audit-button-motion w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
             >
               Upload File
             </button>
@@ -1472,7 +1490,7 @@ function FilesSection({
               {visibleFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-4"
+                  className="audit-list-item rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-4"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -1488,7 +1506,7 @@ function FilesSection({
                           openMapping(file.id);
                           setActiveSection("mapping");
                         }}
-                        className="rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
+                        className="audit-button-motion rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
                       >
                         Map Columns
                       </button>
@@ -1496,7 +1514,7 @@ function FilesSection({
                       <button
                         onClick={() => deleteUploadedFile(file.id)}
                         disabled={busy}
-                        className="rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
+                        className="audit-button-motion rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
                       >
                         Delete File
                       </button>
@@ -1772,7 +1790,7 @@ function MappingSection({
                 <button
                   onClick={saveMapping}
                   disabled={busy}
-                  className="rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+                  className="audit-button-motion rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
                 >
                   Save Mapping
                 </button>
@@ -1780,7 +1798,7 @@ function MappingSection({
                 <button
                   onClick={parseFiles}
                   disabled={busy}
-                  className="rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                  className="audit-button-motion rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
                 >
                   Extract Records
                 </button>
@@ -2052,7 +2070,7 @@ function AuditSection({
               <button
                 onClick={parseFiles}
                 disabled={busy}
-                className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+                className="audit-button-motion w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
               >
                 Apply Mapping & Extract Records
               </button>
@@ -2060,7 +2078,7 @@ function AuditSection({
               <button
                 onClick={selected.run}
                 disabled={busy}
-                className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+                className="audit-button-motion w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
               >
                 Run {selected.label}
               </button>
@@ -2147,7 +2165,7 @@ function AuditSection({
                       key={run.id}
                       className={
                         active
-                          ? "rounded-2xl border border-[#358873] bg-[#EDF6F0] p-4"
+                          ? "audit-list-item audit-active-pulse rounded-2xl border border-[#358873] bg-[#EDF6F0] p-4"
                           : "rounded-2xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"
                       }
                     >
@@ -2174,7 +2192,7 @@ function AuditSection({
                         <button
                           onClick={() => deleteAuditRun(run.id)}
                           disabled={busy}
-                          className="rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
+                          className="audit-button-motion rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
                         >
                           Delete
                         </button>
@@ -2412,7 +2430,7 @@ function FindingsSection({
             {filteredFindings.map((finding) => (
               <div
                 key={finding.id}
-                className="rounded-xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"
+                className="audit-list-item rounded-xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"
               >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -2978,7 +2996,7 @@ function AuditChatSection({
               <button
                 onClick={() => sendMessage()}
                 disabled={busy || !input.trim()}
-                className="rounded-xl bg-[#358873] px-5 py-3 text-sm font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+                className="audit-button-motion rounded-xl bg-[#358873] px-5 py-3 text-sm font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
               >
                 Send
               </button>
@@ -3235,7 +3253,7 @@ function ActionButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+      className="audit-button-motion rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
     >
       {label}
     </button>

@@ -123,3 +123,176 @@ body {
   background: rgba(78, 156, 129, 0.34);
   animation: driftThree 36s ease-in-out infinite;
 }
+
+
+/* Workspace detail polish animations */
+@keyframes auditFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes auditFadeDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes auditSlideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes auditScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.975) translateY(10px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes auditSoftPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(53, 136, 115, 0.16);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(53, 136, 115, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(53, 136, 115, 0);
+  }
+}
+
+.audit-nav-enter {
+  animation: auditFadeDown 520ms ease-out both;
+}
+
+.audit-sidebar-enter {
+  animation: auditSlideInLeft 620ms ease-out both;
+}
+
+.audit-stage-enter {
+  animation: auditFadeUp 620ms ease-out both;
+}
+
+.audit-header-enter {
+  animation: auditScaleIn 650ms ease-out both;
+}
+
+.audit-metrics-enter {
+  animation: auditFadeUp 700ms ease-out both;
+  animation-delay: 80ms;
+}
+
+.audit-status-enter {
+  animation: auditScaleIn 420ms ease-out both;
+}
+
+.audit-section-enter {
+  animation: auditFadeUp 520ms ease-out both;
+}
+
+.audit-card-motion {
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.audit-card-motion:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 34px rgba(23, 53, 46, 0.075);
+}
+
+.audit-list-item {
+  animation: auditFadeUp 420ms ease-out both;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.audit-list-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(23, 53, 46, 0.06);
+}
+
+.audit-button-motion {
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.audit-button-motion:hover {
+  transform: translateY(-1px);
+}
+
+.audit-button-motion:active {
+  transform: translateY(0);
+}
+
+.audit-active-pulse {
+  animation: auditSoftPulse 1800ms ease-out infinite;
+}
+
+.audit-stagger-1 { animation-delay: 60ms; }
+.audit-stagger-2 { animation-delay: 120ms; }
+.audit-stagger-3 { animation-delay: 180ms; }
+.audit-stagger-4 { animation-delay: 240ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .audit-nav-enter,
+  .audit-sidebar-enter,
+  .audit-stage-enter,
+  .audit-header-enter,
+  .audit-metrics-enter,
+  .audit-status-enter,
+  .audit-section-enter,
+  .audit-list-item {
+    animation: none !important;
+  }
+
+  .audit-card-motion,
+  .audit-list-item,
+  .audit-button-motion {
+    transition: none !important;
+  }
+
+  .audit-card-motion:hover,
+  .audit-list-item:hover,
+  .audit-button-motion:hover {
+    transform: none !important;
+  }
+}
+
