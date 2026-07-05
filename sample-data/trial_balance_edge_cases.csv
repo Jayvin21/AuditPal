@@ -1,0 +1,16 @@
+Ledger Name,Group,Debit,Credit,Narration
+Cash in Hand,Current Assets,0,25000,Negative cash balance
+HDFC Bank,Current Assets,100000,0,Normal bank balance
+Trade Debtors,Current Assets,350000,0,Receivables balance
+Trade Creditors,Current Liabilities,50000,0,Debit balance in liability ledger
+Sales Revenue,Income,25000,0,Income ledger debit balance
+Rent Expense,Expenses,0,10000,Expense ledger credit balance
+Suspense Account,Suspense,75000,0,Suspense balance open
+Unsecured Loan,Loans,200000,0,Loan ledger debit balance
+Fixed Assets,Fixed Assets,750000,0,Material asset balance
+Provision for Expenses,Current Liabilities,0,300000,Provision balance
+Round Balance Expense,Expenses,100000,0,Round number balance
+,Current Assets,20000,0,Missing ledger name
+Inventory Stock,Current Assets,0,5000,Credit balance in asset ledger
+GST Payable,Current Liabilities,0,90000,Normal payable
+Misc Income,Income,0,15000,Normal income credit

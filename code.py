@@ -13,22 +13,35 @@ CHECKS_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------
-# 1. Fixed assets audit checks
+# 1. Trial balance / financial statement checks
 # ----------------------------------------------------
 
-(CHECKS_DIR / "fixed_asset_checks.py").write_text(
-r'''from collections import defaultdict
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+(CHECKS_DIR / "trial_balance_checks.py").write_text(
+r'''from decimal import Decimal, InvalidOperation
 
 
-REPAIRS_KEYWORDS = ["repair", "repairs", "maintenance", "servicing", "service", "renovation", "painting"]
-DISPOSAL_KEYWORDS = ["sold", "sale", "disposed", "scrapped", "discarded", "write off", "written off"]
-LAND_KEYWORDS = ["land", "freehold land"]
-VEHICLE_KEYWORDS = ["vehicle", "car", "truck", "bike", "motor"]
-COMPUTER_KEYWORDS = ["computer", "laptop", "server", "printer", "it equipment"]
-FURNITURE_KEYWORDS = ["furniture", "fixture", "office equipment"]
-PLANT_KEYWORDS = ["plant", "machinery", "machine", "equipment"]
+ASSET_KEYWORDS = [
+    "cash", "bank", "debtor", "receivable", "asset", "fixed asset", "inventory",
+    "stock", "advance", "deposit", "loan given", "prepaid"
+]
+
+LIABILITY_KEYWORDS = [
+    "creditor", "payable", "liability", "loan", "unsecured loan", "secured loan",
+    "capital", "provision", "duties", "tax payable", "gst payable", "tds payable"
+]
+
+INCOME_KEYWORDS = [
+    "sales", "revenue", "income", "interest received", "commission received"
+]
+
+EXPENSE_KEYWORDS = [
+    "expense", "purchase", "salary", "wages", "rent", "professional fees",
+    "repairs", "maintenance", "depreciation", "travelling", "office"
+]
+
+SUSPENSE_KEYWORDS = ["suspense", "temporary", "dummy", "unknown", "unclassified"]
+CASH_BANK_KEYWORDS = ["cash", "bank"]
+LOAN_ADVANCE_KEYWORDS = ["loan", "advance", "deposit"]
 
 
 def _norm(value):
@@ -55,19 +68,6 @@ def _amount(value):
         return None
 
 
-def _date_string(value):
-    if not value:
-        return ""
-    if isinstance(value, (date, datetime)):
-        return value.strftime("%Y-%m-%d")
-    return str(value)
-
-
-def _is_year_end(value):
-    text = _date_string(value)
-    return any(marker in text for marker in ["03-31", "31-03", "31/03", "2025-03-31", "2026-03-31"])
-
-
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
     lowered = {str(k).strip().lower(): v for k, v in raw.items()}
@@ -83,126 +83,110 @@ def _raw(record, *keys):
     return None
 
 
-def _description(record):
+def _ledger_name(record):
     return (
-        _raw(record, "Description", "Asset Description", "Narration", "Particulars", "Asset Name", "Text")
-        or getattr(record, "description", None)
+        getattr(record, "party_name", None)
+        or _raw(record, "Ledger Name", "Account Name", "Account", "Particulars", "G/L Account", "GL Account", "Ledger")
         or ""
     )
 
 
-def _asset_id(record):
-    return (
-        _raw(record, "Asset ID", "Asset Code", "Asset No", "Asset Number", "FA Code", "Tag No")
-        or getattr(record, "document_id", None)
-        or ""
-    )
+def _group(record):
+    return _raw(record, "Group", "Primary Group", "Schedule", "FS Group", "Classification", "Nature") or ""
 
 
-def _asset_category(record):
-    return (
-        _raw(record, "Asset Category", "Category", "Block", "Asset Class", "Class", "Group")
-        or getattr(record, "party_name", None)
-        or ""
-    )
+def _debit(record):
+    return _amount(_raw(record, "Debit", "Debit Balance", "Dr", "Dr Balance"))
 
 
-def _cost(record):
-    return _amount(
+def _credit(record):
+    return _amount(_raw(record, "Credit", "Credit Balance", "Cr", "Cr Balance"))
+
+
+def _closing_balance(record):
+    direct = _amount(
         _raw(
             record,
-            "Cost",
-            "Asset Cost",
-            "Gross Block",
-            "Original Cost",
-            "Capitalized Amount",
-            "Acquisition Value",
-            "Purchase Value",
-        )
-        or getattr(record, "amount", None)
-    )
-
-
-def _depreciation(record):
-    return _amount(
-        _raw(
-            record,
-            "Depreciation",
-            "Depreciation Amount",
-            "Current Year Depreciation",
-            "Dep for the Year",
-            "Accumulated Depreciation",
-            "Accum Dep",
+            "Closing Balance",
+            "Balance",
+            "Amount",
+            "Closing",
+            "Net Balance",
+            "Current Year Balance",
         )
     )
 
+    if direct is not None:
+        return direct
 
-def _wdv(record):
-    return _amount(_raw(record, "WDV", "Net Block", "Carrying Amount", "Written Down Value", "Net Book Value"))
+    debit = _debit(record)
+    credit = _credit(record)
 
+    if debit is not None or credit is not None:
+        return (debit or 0) - (credit or 0)
 
-def _status(record):
-    return _raw(record, "Status", "Asset Status", "Disposal Status") or ""
-
-
-def _rate(record):
-    value = _raw(record, "Depreciation Rate", "Dep Rate", "Rate", "Useful Life Rate")
-    if value is None:
-        return None
-    text = str(value).replace("%", "").strip()
-    return _amount(text)
+    return _amount(getattr(record, "amount", None))
 
 
-def _expected_rate_band(category_text):
-    text = category_text.lower()
+def _balance_side(balance):
+    if balance is None:
+        return ""
+    if balance > 0:
+        return "debit"
+    if balance < 0:
+        return "credit"
+    return "zero"
 
-    if any(keyword in text for keyword in LAND_KEYWORDS):
-        return (0, 0)
-    if any(keyword in text for keyword in COMPUTER_KEYWORDS):
-        return (20, 80)
-    if any(keyword in text for keyword in VEHICLE_KEYWORDS):
-        return (10, 40)
-    if any(keyword in text for keyword in FURNITURE_KEYWORDS):
-        return (5, 25)
-    if any(keyword in text for keyword in PLANT_KEYWORDS):
-        return (5, 30)
 
-    return (0, 60)
+def _classification_text(record):
+    return " ".join([
+        _lower(_ledger_name(record)),
+        _lower(_group(record)),
+        _lower(_raw(record, "Description", "Narration", "Text") or ""),
+    ])
+
+
+def _expected_nature(text):
+    if any(keyword in text for keyword in ASSET_KEYWORDS):
+        return "asset"
+    if any(keyword in text for keyword in LIABILITY_KEYWORDS):
+        return "liability"
+    if any(keyword in text for keyword in INCOME_KEYWORDS):
+        return "income"
+    if any(keyword in text for keyword in EXPENSE_KEYWORDS):
+        return "expense"
+    return "unknown"
 
 
 def _title(base, record):
+    ledger = _ledger_name(record)
+    balance = _closing_balance(record)
     bits = []
-    asset_id = _norm(_asset_id(record))
-    category = _norm(_asset_category(record))
-    cost = _cost(record)
 
-    if asset_id:
-        bits.append(asset_id)
-    if category:
-        bits.append(category)
-    if cost is not None:
-        bits.append(f"₹{cost:,.0f}")
+    if ledger:
+        bits.append(ledger)
+    if balance is not None:
+        bits.append(f"₹{abs(balance):,.0f} { _balance_side(balance) }")
 
     if not bits:
         return base
 
-    return f"{base} — {' · '.join(bits[:3])}"
+    return f"{base} — {' · '.join(bits[:2])}"
 
 
 def _finding(record, finding_type, risk_level, title, description, extra=None):
+    balance = _closing_balance(record)
+
     evidence = {
         "record_id": getattr(record, "id", None),
         "source_row": getattr(record, "source_row", None),
-        "asset_id": _asset_id(record),
+        "ledger_name": _ledger_name(record),
+        "group": _group(record),
+        "closing_balance": balance,
+        "balance_side": _balance_side(balance),
+        "debit": _debit(record),
+        "credit": _credit(record),
         "document_id": getattr(record, "document_id", None),
-        "asset_category": _asset_category(record),
-        "asset_description": _description(record),
-        "capitalization_date": _date_string(getattr(record, "transaction_date", None)),
-        "cost": _cost(record),
-        "depreciation": _depreciation(record),
-        "wdv": _wdv(record),
-        "depreciation_rate": _rate(record),
-        "status": _status(record),
         "record_type": getattr(record, "record_type", None),
     }
 
@@ -219,215 +203,148 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
     }
 
 
-def run_fixed_asset_checks(records):
+def run_trial_balance_checks(records):
     findings = []
-    asset_index = defaultdict(list)
-    invoice_index = defaultdict(list)
+
+    total_debit_balance = 0
+    total_credit_balance = 0
 
     for record in records:
-        asset_id = _norm(_asset_id(record))
-        document_id = _norm(getattr(record, "document_id", None))
-        category = _asset_category(record)
-        category_lower = _lower(category)
-        description = _description(record)
-        description_lower = _lower(description)
-        combined_text = " ".join([category_lower, description_lower, _lower(_status(record))])
+        ledger = _ledger_name(record)
+        text = _classification_text(record)
+        expected = _expected_nature(text)
+        balance = _closing_balance(record)
+        side = _balance_side(balance)
 
-        cost = _cost(record)
-        dep = _depreciation(record)
-        wdv = _wdv(record)
-        dep_rate = _rate(record)
-        cap_date = getattr(record, "transaction_date", None)
-
-        if asset_id:
-            asset_index[asset_id.lower()].append(record)
-
-        if document_id:
-            invoice_index[document_id.lower()].append(record)
-
-        if not asset_id:
+        if not ledger:
             findings.append(_finding(
                 record,
-                "missing_asset_id",
+                "missing_ledger_name_trial_balance",
                 "high",
-                "Missing fixed asset ID/code",
-                "Fixed asset record has no asset ID/code/tag. This weakens physical verification and register tracking.",
+                "Missing ledger/account name",
+                "Trial balance row does not contain a usable ledger/account name.",
             ))
 
-        if not category:
+        if balance is None:
             findings.append(_finding(
                 record,
-                "missing_asset_category",
-                "medium",
-                "Missing asset category/class",
-                "Fixed asset record has no asset category/class/block. Depreciation and classification cannot be reviewed reliably.",
-            ))
-
-        if not cap_date:
-            findings.append(_finding(
-                record,
-                "missing_capitalization_date",
+                "missing_trial_balance_amount",
                 "high",
-                "Missing capitalization/acquisition date",
-                "Fixed asset record does not have a capitalization/acquisition date.",
-            ))
-
-        if cost is None:
-            findings.append(_finding(
-                record,
-                "missing_asset_cost",
-                "high",
-                "Missing fixed asset cost",
-                "Fixed asset record does not have a usable cost/capitalized amount.",
+                "Missing trial balance amount",
+                "Trial balance row does not contain debit, credit, or closing balance amount.",
             ))
             continue
 
-        if cost <= 0:
+        if balance > 0:
+            total_debit_balance += balance
+        elif balance < 0:
+            total_credit_balance += abs(balance)
+
+        if any(keyword in text for keyword in SUSPENSE_KEYWORDS) and abs(balance) > 0:
             findings.append(_finding(
                 record,
-                "non_positive_asset_cost",
+                "suspense_balance_present",
                 "high",
-                "Non-positive fixed asset cost",
-                "Fixed asset record has zero or negative cost. Review classification and posting.",
-                {"cost": cost},
+                "Suspense/temporary account has balance",
+                "Suspense, temporary, dummy, unknown, or unclassified ledger has a non-zero balance.",
+                {"classification_text": text},
             ))
 
-        if cost >= 100000:
+        if any(keyword in text for keyword in CASH_BANK_KEYWORDS) and balance < 0:
             findings.append(_finding(
                 record,
-                "high_value_asset_addition",
-                "medium",
-                "High-value fixed asset addition",
-                "Asset addition is above ₹1,00,000. Verify invoice, approval, capitalization date, and physical existence.",
-                {"cost": cost},
-            ))
-
-        if _is_year_end(cap_date):
-            findings.append(_finding(
-                record,
-                "year_end_asset_capitalization",
-                "medium",
-                "Year-end asset capitalization",
-                "Asset was capitalized near financial year end. Verify put-to-use date, invoice, and depreciation start date.",
-            ))
-
-        if any(keyword in combined_text for keyword in REPAIRS_KEYWORDS) and cost >= 10000:
-            findings.append(_finding(
-                record,
-                "repairs_or_maintenance_capitalized",
-                "medium",
-                "Repairs/maintenance may be capitalized",
-                "Asset description suggests repairs/maintenance/service expense. Verify whether capitalization is appropriate.",
-                {"cost": cost, "description": description},
-            ))
-
-        if any(keyword in combined_text for keyword in DISPOSAL_KEYWORDS):
-            findings.append(_finding(
-                record,
-                "asset_disposal_indicator",
-                "medium",
-                "Asset disposal/sale/write-off indicator",
-                "Asset record suggests sale, disposal, scrap, or write-off. Verify sale proceeds, gain/loss, GST, and register removal.",
-                {"status": _status(record), "description": description},
-            ))
-
-        if dep is None:
-            if not any(keyword in category_lower for keyword in LAND_KEYWORDS):
-                findings.append(_finding(
-                    record,
-                    "missing_depreciation",
-                    "medium",
-                    "Missing depreciation amount",
-                    "Depreciable asset has no visible depreciation amount. Verify depreciation schedule.",
-                    {"category": category},
-                ))
-        elif dep < 0:
-            findings.append(_finding(
-                record,
-                "negative_depreciation",
+                "negative_cash_or_bank_balance",
                 "high",
-                "Negative depreciation amount",
-                "Depreciation amount is negative. Review depreciation posting or reversal.",
-                {"depreciation": dep},
+                "Negative cash/bank balance",
+                "Cash or bank ledger has credit/negative balance. Review overdraft classification, bank reconciliation, or posting error.",
+                {"classification_text": text},
             ))
-        elif dep > cost:
+
+        if expected == "asset" and side == "credit":
             findings.append(_finding(
                 record,
-                "depreciation_exceeds_cost",
-                "high",
-                "Depreciation exceeds asset cost",
-                "Depreciation amount is greater than asset cost. This is likely incorrect.",
-                {"cost": cost, "depreciation": dep},
+                "asset_ledger_credit_balance",
+                "medium",
+                "Asset ledger has credit balance",
+                "Ledger appears to be an asset but has a credit balance. Review classification and postings.",
+                {"expected_nature": expected},
             ))
 
-        if dep_rate is not None:
-            low, high = _expected_rate_band(category)
-            if dep_rate < low or dep_rate > high:
-                findings.append(_finding(
-                    record,
-                    "unusual_depreciation_rate",
-                    "medium",
-                    "Unusual depreciation rate",
-                    "Depreciation rate appears outside the expected broad range for this asset category.",
-                    {
-                        "category": category,
-                        "depreciation_rate": dep_rate,
-                        "expected_range": f"{low}% to {high}%",
-                    },
-                ))
-
-        if wdv is not None:
-            if wdv < 0:
-                findings.append(_finding(
-                    record,
-                    "negative_wdv_or_net_block",
-                    "high",
-                    "Negative WDV/net block",
-                    "Asset has negative written down value/net block. Review depreciation and disposal accounting.",
-                    {"wdv": wdv},
-                ))
-
-            if wdv == 0 and not any(keyword in combined_text for keyword in DISPOSAL_KEYWORDS):
-                findings.append(_finding(
-                    record,
-                    "fully_depreciated_asset_still_active",
-                    "low",
-                    "Fully depreciated asset still active",
-                    "Asset has zero WDV but no visible disposal/write-off indicator. Consider physical verification and active-use status.",
-                    {"wdv": wdv},
-                ))
-
-    for asset_id, asset_records in asset_index.items():
-        if len(asset_records) > 1:
-            first = asset_records[0]
+        if expected == "liability" and side == "debit":
             findings.append(_finding(
-                first,
-                "duplicate_asset_id",
+                record,
+                "liability_ledger_debit_balance",
+                "medium",
+                "Liability ledger has debit balance",
+                "Ledger appears to be a liability but has a debit balance. Review classification, advances, or reversal postings.",
+                {"expected_nature": expected},
+            ))
+
+        if expected == "income" and side == "debit":
+            findings.append(_finding(
+                record,
+                "income_ledger_debit_balance",
+                "medium",
+                "Income ledger has debit balance",
+                "Ledger appears to be income/revenue but has a debit balance. Review returns, reversals, or classification.",
+                {"expected_nature": expected},
+            ))
+
+        if expected == "expense" and side == "credit":
+            findings.append(_finding(
+                record,
+                "expense_ledger_credit_balance",
+                "medium",
+                "Expense ledger has credit balance",
+                "Ledger appears to be expense but has a credit balance. Review reversals, provisions, or classification.",
+                {"expected_nature": expected},
+            ))
+
+        if abs(balance) >= 500000:
+            findings.append(_finding(
+                record,
+                "high_value_trial_balance_ledger",
+                "medium",
+                "High-value trial balance ledger",
+                "Ledger balance is above ₹5,00,000. Consider materiality, variance, and supporting schedule review.",
+                {"balance": balance},
+            ))
+
+        if abs(balance) >= 10000 and abs(balance) % 1000 == 0:
+            findings.append(_finding(
+                record,
+                "round_number_trial_balance_ledger",
+                "low",
+                "Round-number ledger balance",
+                "Ledger balance is a round number. This can be normal but may indicate manual estimate or provision.",
+                {"balance": balance},
+            ))
+
+        if any(keyword in text for keyword in LOAN_ADVANCE_KEYWORDS) and abs(balance) >= 100000:
+            findings.append(_finding(
+                record,
+                "loan_advance_deposit_balance_review",
+                "medium",
+                "Loan/advance/deposit balance review",
+                "Ledger appears to involve loan, advance, or deposit balance. Verify confirmation, classification, and recoverability.",
+                {"classification_text": text, "balance": balance},
+            ))
+
+    difference = round(abs(total_debit_balance - total_credit_balance), 2)
+
+    if difference > 1:
+        pseudo_record = records[0] if records else None
+        if pseudo_record:
+            findings.append(_finding(
+                pseudo_record,
+                "trial_balance_not_balanced",
                 "high",
-                "Duplicate fixed asset ID/code",
-                "Same asset ID/code appears multiple times. Verify whether records are duplicate or represent valid componentization.",
+                "Trial balance debit/credit totals do not match",
+                "Total debit balances and total credit balances do not agree. Review export format, missing rows, or mapping.",
                 {
-                    "asset_id": asset_id,
-                    "duplicate_count": len(asset_records),
-                    "source_rows": [getattr(record, "source_row", None) for record in asset_records],
-                    "record_ids": [getattr(record, "id", None) for record in asset_records],
-                },
-            ))
-
-    for invoice, invoice_records in invoice_index.items():
-        if len(invoice_records) > 1:
-            first = invoice_records[0]
-            findings.append(_finding(
-                first,
-                "duplicate_asset_invoice_reference",
-                "medium",
-                "Duplicate asset invoice/reference",
-                "Same invoice/reference appears across multiple asset records. Verify if this is valid split capitalization or duplicate booking.",
-                {
-                    "invoice": invoice,
-                    "duplicate_count": len(invoice_records),
-                    "source_rows": [getattr(record, "source_row", None) for record in invoice_records],
-                    "record_ids": [getattr(record, "id", None) for record in invoice_records],
+                    "total_debit_balance": round(total_debit_balance, 2),
+                    "total_credit_balance": round(total_credit_balance, 2),
+                    "difference": difference,
                 },
             ))
 
@@ -442,35 +359,34 @@ encoding="utf-8",
 
 runner = RUNNER.read_text(encoding="utf-8")
 
-if "from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks" not in runner:
-    if "from app.services.audit_engine.checks.tds_checks import run_tds_checks" in runner:
+if "from app.services.audit_engine.checks.trial_balance_checks import run_trial_balance_checks" not in runner:
+    if "from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks" in runner:
         runner = runner.replace(
-            "from app.services.audit_engine.checks.tds_checks import run_tds_checks",
-            "from app.services.audit_engine.checks.tds_checks import run_tds_checks\nfrom app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks",
+            "from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks",
+            "from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks\nfrom app.services.audit_engine.checks.trial_balance_checks import run_trial_balance_checks",
         )
     else:
         runner = runner.replace(
             "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
-            "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks\nfrom app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks",
+            "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks\nfrom app.services.audit_engine.checks.trial_balance_checks import run_trial_balance_checks",
         )
 
-if "FIXED_ASSET_FILE_TYPES" not in runner:
+if "TRIAL_BALANCE_FILE_TYPES" not in runner:
     runner += '''
 
-FIXED_ASSET_FILE_TYPES = {
-    "fixed_asset_register",
-    "fixed_assets",
-    "asset_register",
-    "depreciation_schedule",
-    "sap_asset_register",
-    "tally_fixed_assets",
+TRIAL_BALANCE_FILE_TYPES = {
+    "trial_balance",
+    "tally_trial_balance",
+    "sap_trial_balance",
+    "financial_statement",
+    "fs_trial_balance",
 }
 '''
 
-if "def run_fixed_asset_audit" not in runner:
-    fixed_asset_function = r'''
+if "def run_trial_balance_review" not in runner:
+    tb_function = r'''
 
-def run_fixed_asset_audit(workspace_id: int, db: Session) -> dict:
+def run_trial_balance_review(workspace_id: int, db: Session) -> dict:
     parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
 
     records = (
@@ -479,17 +395,17 @@ def run_fixed_asset_audit(workspace_id: int, db: Session) -> dict:
         .all()
     )
 
-    fixed_asset_records = [
+    trial_balance_records = [
         record for record in records
-        if record.record_type.lower() in FIXED_ASSET_FILE_TYPES
+        if record.record_type.lower() in TRIAL_BALANCE_FILE_TYPES
     ]
 
     clear_findings(workspace_id, db)
 
-    if not fixed_asset_records:
+    if not trial_balance_records:
         audit_run = AuditRun(
             workspace_id=workspace_id,
-            audit_type="fixed_asset_audit",
+            audit_type="trial_balance_review",
             status="completed_with_limitations",
             total_records=len(records),
             checked_records=0,
@@ -503,26 +419,26 @@ def run_fixed_asset_audit(workspace_id: int, db: Session) -> dict:
         return {
             "audit_run_id": audit_run.id,
             "status": audit_run.status,
-            "message": "Fixed asset audit needs a fixed asset register or depreciation schedule file.",
+            "message": "Trial balance review needs a trial_balance, Tally trial balance, SAP trial balance, or financial statement file.",
             "parse_summary": parse_summary,
             "coverage": {
                 "total_records": len(records),
-                "fixed_asset_records_checked": 0,
+                "trial_balance_records_checked": 0,
                 "unchecked_records": len(records),
                 "issues_found": 0,
             },
         }
 
-    finding_payloads = run_fixed_asset_checks(fixed_asset_records)
+    finding_payloads = run_trial_balance_checks(trial_balance_records)
 
     audit_run = AuditRun(
         workspace_id=workspace_id,
-        audit_type="fixed_asset_audit",
+        audit_type="trial_balance_review",
         status="completed",
-        total_records=len(fixed_asset_records),
-        checked_records=len(fixed_asset_records),
+        total_records=len(trial_balance_records),
+        checked_records=len(trial_balance_records),
         issues_found=len(finding_payloads),
-        unchecked_records=max(0, len(records) - len(fixed_asset_records)),
+        unchecked_records=max(0, len(records) - len(trial_balance_records)),
     )
 
     db.add(audit_run)
@@ -534,23 +450,23 @@ def run_fixed_asset_audit(workspace_id: int, db: Session) -> dict:
     return {
         "audit_run_id": audit_run.id,
         "status": audit_run.status,
-        "message": "Fixed asset audit completed using uploaded asset records",
+        "message": "Trial balance review completed using uploaded trial balance records",
         "parse_summary": parse_summary,
         "coverage": {
             "total_records": len(records),
-            "fixed_asset_records_checked": len(fixed_asset_records),
+            "trial_balance_records_checked": len(trial_balance_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
         },
     }
 '''
-    if "\n\ndef run_tds_review" in runner:
-        runner = runner.replace("\n\ndef run_tds_review", fixed_asset_function + "\n\ndef run_tds_review")
-    elif "\n\ndef run_ledger_scrutiny" in runner:
-        runner = runner.replace("\n\ndef run_ledger_scrutiny", fixed_asset_function + "\n\ndef run_ledger_scrutiny")
+    if "\n\ndef run_fixed_asset_audit" in runner:
+        runner = runner.replace("\n\ndef run_fixed_asset_audit", tb_function + "\n\ndef run_fixed_asset_audit")
+    elif "\n\ndef run_tds_review" in runner:
+        runner = runner.replace("\n\ndef run_tds_review", tb_function + "\n\ndef run_tds_review")
     else:
-        runner += fixed_asset_function
+        runner += tb_function
 
 RUNNER.write_text(runner, encoding="utf-8")
 
@@ -560,37 +476,37 @@ RUNNER.write_text(runner, encoding="utf-8")
 
 routes = AUDIT_RUNS.read_text(encoding="utf-8")
 
-if "run_fixed_asset_audit" not in routes:
-    if "run_tds_review," in routes:
+if "run_trial_balance_review" not in routes:
+    if "run_fixed_asset_audit," in routes:
         routes = routes.replace(
-            "run_tds_review,",
-            "run_tds_review,\n    run_fixed_asset_audit,",
+            "run_fixed_asset_audit,",
+            "run_fixed_asset_audit,\n    run_trial_balance_review,",
         )
     else:
         routes = routes.replace(
-            "run_ledger_scrutiny,",
-            "run_ledger_scrutiny,\n    run_fixed_asset_audit,",
+            "run_tds_review,",
+            "run_tds_review,\n    run_trial_balance_review,",
         )
 
-if 'run-fixed-asset-audit' not in routes:
+if 'run-trial-balance-review' not in routes:
     endpoint = r'''
 
-@router.post("/{workspace_id}/run-fixed-asset-audit")
-def run_real_fixed_asset_audit(workspace_id: int, db: Session = Depends(get_db)):
+@router.post("/{workspace_id}/run-trial-balance-review")
+def run_real_trial_balance_review(workspace_id: int, db: Session = Depends(get_db)):
     try:
-        return run_fixed_asset_audit(workspace_id=workspace_id, db=db)
+        return run_trial_balance_review(workspace_id=workspace_id, db=db)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Fixed asset audit failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=f"Trial balance review failed: {str(exc)}")
 '''
-    if '\n\n@router.post("/{workspace_id}/run-tds-review")' in routes:
+    if '\n\n@router.post("/{workspace_id}/run-fixed-asset-audit")' in routes:
+        routes = routes.replace(
+            '\n\n@router.post("/{workspace_id}/run-fixed-asset-audit")',
+            endpoint + '\n\n@router.post("/{workspace_id}/run-fixed-asset-audit")',
+        )
+    elif '\n\n@router.post("/{workspace_id}/run-tds-review")' in routes:
         routes = routes.replace(
             '\n\n@router.post("/{workspace_id}/run-tds-review")',
             endpoint + '\n\n@router.post("/{workspace_id}/run-tds-review")',
-        )
-    elif '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")' in routes:
-        routes = routes.replace(
-            '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")',
-            endpoint + '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")',
         )
     else:
         routes = routes.replace(
@@ -606,135 +522,130 @@ AUDIT_RUNS.write_text(routes, encoding="utf-8")
 
 page = FRONTEND.read_text(encoding="utf-8")
 
-if "fixed_asset_records_checked?: number;" not in page:
+if "trial_balance_records_checked?: number;" not in page:
     page = page.replace(
-        "tds_records_checked?: number;",
-        "tds_records_checked?: number;\n    fixed_asset_records_checked?: number;",
-    )
-    page = page.replace(
-        "ledger_records_checked?: number;",
-        "ledger_records_checked?: number;\n    fixed_asset_records_checked?: number;",
+        "fixed_asset_records_checked?: number;",
+        "fixed_asset_records_checked?: number;\n    trial_balance_records_checked?: number;",
     )
 
-# Add file type options
-if '<option value="fixed_asset_register">Fixed Asset Register</option>' not in page:
+# Add Tally/SAP trial balance options
+if '<option value="tally_trial_balance">Tally Trial Balance</option>' not in page:
     page = page.replace(
         '<option value="trial_balance">Trial Balance</option>',
-        '''<option value="fixed_asset_register">Fixed Asset Register</option>
-            <option value="depreciation_schedule">Depreciation Schedule</option>
-            <option value="sap_asset_register">SAP Asset Register</option>
-            <option value="tally_fixed_assets">Tally Fixed Assets</option>
+        '''<option value="tally_trial_balance">Tally Trial Balance</option>
+            <option value="sap_trial_balance">SAP Trial Balance</option>
+            <option value="financial_statement">Financial Statement</option>
             <option value="trial_balance">Trial Balance</option>''',
     )
 
 # Add run function
-if "async function runFixedAssetAudit()" not in page:
+if "async function runTrialBalanceReview()" not in page:
     fn = r'''
-  async function runFixedAssetAudit() {
+  async function runTrialBalanceReview() {
     setBusy(true);
-    setStatusMessage("Running fixed asset audit...");
+    setStatusMessage("Running trial balance review...");
 
     try {
-      const res = await api.post(`/audit-runs/${workspaceId}/run-fixed-asset-audit`);
+      const res = await api.post(`/audit-runs/${workspaceId}/run-trial-balance-review`);
       setAuditSummary(res.data);
       setSelectedAuditRunId(res.data.audit_run_id);
-      setStatusMessage("Fixed asset audit completed.");
+      setStatusMessage("Trial balance review completed.");
       await refreshAll();
       setActiveSection("findings");
     } catch {
-      setStatusMessage("Fixed asset audit failed.");
+      setStatusMessage("Trial balance review failed.");
     } finally {
       setBusy(false);
     }
   }
 
 '''
-    if "  async function runTdsReview()" in page:
-        page = page.replace("  async function runTdsReview()", fn + "  async function runTdsReview()")
+    if "  async function runFixedAssetAudit()" in page:
+        page = page.replace("  async function runFixedAssetAudit()", fn + "  async function runFixedAssetAudit()")
     else:
-        page = page.replace("  async function runLedgerScrutiny()", fn + "  async function runLedgerScrutiny()")
+        page = page.replace("  async function runTdsReview()", fn + "  async function runTdsReview()")
 
-# Pass prop into AuditSection call
-if "runFixedAssetAudit={runFixedAssetAudit}" not in page:
-    if "runTdsReview={runTdsReview}" in page:
+# Pass prop
+if "runTrialBalanceReview={runTrialBalanceReview}" not in page:
+    if "runFixedAssetAudit={runFixedAssetAudit}" in page:
+        page = page.replace(
+            "runExpenseAudit={runExpenseAudit}\n                runFixedAssetAudit={runFixedAssetAudit}",
+            "runExpenseAudit={runExpenseAudit}\n                runTrialBalanceReview={runTrialBalanceReview}\n                runFixedAssetAudit={runFixedAssetAudit}",
+        )
+    else:
         page = page.replace(
             "runExpenseAudit={runExpenseAudit}\n                runTdsReview={runTdsReview}",
-            "runExpenseAudit={runExpenseAudit}\n                runFixedAssetAudit={runFixedAssetAudit}\n                runTdsReview={runTdsReview}",
-        )
-    else:
-        page = page.replace(
-            "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}",
-            "runExpenseAudit={runExpenseAudit}\n                runFixedAssetAudit={runFixedAssetAudit}\n                runLedgerScrutiny={runLedgerScrutiny}",
+            "runExpenseAudit={runExpenseAudit}\n                runTrialBalanceReview={runTrialBalanceReview}\n                runTdsReview={runTdsReview}",
         )
 
-# Add AuditSection destructuring prop
-if "runFixedAssetAudit," not in page:
-    if "runTdsReview," in page:
+# Destructure prop
+if "runTrialBalanceReview," not in page:
+    if "runFixedAssetAudit," in page:
+        page = page.replace(
+            "runExpenseAudit,\n  runFixedAssetAudit,",
+            "runExpenseAudit,\n  runTrialBalanceReview,\n  runFixedAssetAudit,",
+        )
+    else:
         page = page.replace(
             "runExpenseAudit,\n  runTdsReview,",
-            "runExpenseAudit,\n  runFixedAssetAudit,\n  runTdsReview,",
-        )
-    else:
-        page = page.replace(
-            "runExpenseAudit,\n  runLedgerScrutiny,",
-            "runExpenseAudit,\n  runFixedAssetAudit,\n  runLedgerScrutiny,",
+            "runExpenseAudit,\n  runTrialBalanceReview,\n  runTdsReview,",
         )
 
-# Add AuditSection prop type
-if "runFixedAssetAudit: () => void;" not in page:
-    if "runTdsReview: () => void;" in page:
+# Prop type
+if "runTrialBalanceReview: () => void;" not in page:
+    if "runFixedAssetAudit: () => void;" in page:
+        page = page.replace(
+            "runExpenseAudit: () => void;\n  runFixedAssetAudit: () => void;",
+            "runExpenseAudit: () => void;\n  runTrialBalanceReview: () => void;\n  runFixedAssetAudit: () => void;",
+        )
+    else:
         page = page.replace(
             "runExpenseAudit: () => void;\n  runTdsReview: () => void;",
-            "runExpenseAudit: () => void;\n  runFixedAssetAudit: () => void;\n  runTdsReview: () => void;",
-        )
-    else:
-        page = page.replace(
-            "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;",
-            "runExpenseAudit: () => void;\n  runFixedAssetAudit: () => void;\n  runLedgerScrutiny: () => void;",
+            "runExpenseAudit: () => void;\n  runTrialBalanceReview: () => void;\n  runTdsReview: () => void;",
         )
 
-# Add module option
-if 'key: "fixed_asset"' not in page:
+# Module option
+if 'key: "trial_balance"' not in page:
     expense_option = r'''    {
       key: "expense",
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
     },'''
-    fixed_option = expense_option + r'''
+    tb_option = expense_option + r'''
     {
-      key: "fixed_asset",
-      label: "Fixed Asset Audit",
-      description: "Reviews fixed asset registers for missing asset IDs, capitalization risk, depreciation issues, disposals, and duplicate asset references.",
-      run: runFixedAssetAudit,
+      key: "trial_balance",
+      label: "Trial Balance Review",
+      description: "Reviews trial balance and financial statement ledgers for classification issues, abnormal balances, suspense accounts, and material balances.",
+      run: runTrialBalanceReview,
     },'''
-    page = page.replace(expense_option, fixed_option)
+    page = page.replace(expense_option, tb_option)
 
 # Format audit type
-if 'if (type === "fixed_asset_audit") return "Fixed Asset Audit";' not in page:
-    if 'if (type === "tds_review") return "TDS Review";' in page:
+if 'if (type === "trial_balance_review") return "Trial Balance Review";' not in page:
+    if 'if (type === "fixed_asset_audit") return "Fixed Asset Audit";' in page:
         page = page.replace(
-            'if (type === "tds_review") return "TDS Review";',
-            'if (type === "fixed_asset_audit") return "Fixed Asset Audit";\n  if (type === "tds_review") return "TDS Review";',
+            'if (type === "fixed_asset_audit") return "Fixed Asset Audit";',
+            'if (type === "trial_balance_review") return "Trial Balance Review";\n  if (type === "fixed_asset_audit") return "Fixed Asset Audit";',
         )
     else:
         page = page.replace(
-            'if (type === "ledger_scrutiny") return "Ledger Scrutiny";',
-            'if (type === "fixed_asset_audit") return "Fixed Asset Audit";\n  if (type === "ledger_scrutiny") return "Ledger Scrutiny";',
+            'if (type === "tds_review") return "TDS Review";',
+            'if (type === "trial_balance_review") return "Trial Balance Review";\n  if (type === "tds_review") return "TDS Review";',
         )
 
 # Coverage checked records
 page = page.replace(
-    "coverageSource?.tds_records_checked ??\n    0;",
-    "coverageSource?.tds_records_checked ??\n    coverageSource?.fixed_asset_records_checked ??\n    0;",
+    "coverageSource?.fixed_asset_records_checked ??\n    0;",
+    "coverageSource?.fixed_asset_records_checked ??\n    coverageSource?.trial_balance_records_checked ??\n    0;",
 )
 
 page = page.replace(
-    "coverageSource?.ledger_records_checked ??\n    0;",
-    "coverageSource?.ledger_records_checked ??\n    coverageSource?.fixed_asset_records_checked ??\n    0;",
+    "coverageSource?.tds_records_checked ??\n    0;",
+    "coverageSource?.tds_records_checked ??\n    coverageSource?.trial_balance_records_checked ??\n    0;",
 )
 
-# Infer fixed asset module
+# Infer module
 page = re.sub(
     r"function inferRecommendedAuditModule\(files\?: UploadedFile\[\]\) \{[\s\S]*?\n\}",
     r'''function inferRecommendedAuditModule(files?: UploadedFile[]) {
@@ -747,12 +658,13 @@ page = re.sub(
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("trial_balance") || type.includes("financial_statement") || type.includes("fs_trial")) return "trial_balance";
   if (type.includes("fixed_asset") || type.includes("asset_register") || type.includes("depreciation") || type.includes("sap_asset") || type.includes("tally_fixed")) return "fixed_asset";
   if (type.includes("tds")) return "tds";
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
   if (type.includes("expense")) return "expense";
-  if (type.includes("trial_balance") || type.includes("sap_gl") || type.includes("ledger_vouchers")) return "ledger";
+  if (type.includes("sap_gl") || type.includes("ledger_vouchers")) return "ledger";
   if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";
   if (type.includes("purchase") || type.includes("vendor")) return "purchase";
 
@@ -764,34 +676,34 @@ page = re.sub(
 FRONTEND.write_text(page, encoding="utf-8")
 
 # ----------------------------------------------------
-# 5. Sample fixed asset data
+# 5. Sample trial balance data
 # ----------------------------------------------------
 
-(SAMPLE_DIR / "fixed_asset_register_edge_cases.csv").write_text(
-"""Asset ID,Capitalization Date,Asset Category,Asset Description,Cost,Depreciation,Depreciation Rate,WDV,Status,Invoice No
-FA-001,01-04-2025,Computer,Laptop for office,75000,30000,40,45000,Active,INV-FA-001
-FA-002,31-03-2026,Plant and Machinery,Year end machine addition,250000,0,15,250000,Active,INV-FA-002
-FA-003,15-04-2025,Land,Freehold land purchase,500000,10000,2,490000,Active,INV-FA-003
-FA-004,20-04-2025,Vehicle,Company car,900000,120000,13.3,780000,Active,INV-FA-004
-FA-005,25-04-2025,Repairs,Major repair capitalized as asset,60000,6000,10,54000,Active,INV-FA-005
-FA-006,30-04-2025,Furniture,Office chairs,50000,,10,50000,Active,INV-FA-006
-FA-007,05-05-2025,Computer,Old server,100000,100000,40,0,Active,INV-FA-007
-FA-008,10-05-2025,Equipment,Scrapped equipment,80000,40000,15,40000,Scrapped,INV-FA-008
-,12-05-2025,Computer,Missing asset id,45000,18000,40,27000,Active,INV-FA-009
-FA-010,,Furniture,Missing capitalization date,30000,3000,10,27000,Active,INV-FA-010
-FA-011,18-05-2025,,Missing asset category,35000,3500,10,31500,Active,INV-FA-011
-FA-012,20-05-2025,Computer,Dep exceeds cost,50000,60000,120,-10000,Active,INV-FA-012
-FA-012,20-05-2025,Computer,Duplicate asset id,50000,20000,40,30000,Active,INV-FA-013
-FA-014,22-05-2025,Computer,Split invoice component,25000,10000,40,15000,Active,INV-SPLIT
-FA-015,22-05-2025,Computer,Split invoice component duplicate,25000,10000,40,15000,Active,INV-SPLIT
+(SAMPLE_DIR / "trial_balance_edge_cases.csv").write_text(
+"""Ledger Name,Group,Debit,Credit,Narration
+Cash in Hand,Current Assets,0,25000,Negative cash balance
+HDFC Bank,Current Assets,100000,0,Normal bank balance
+Trade Debtors,Current Assets,350000,0,Receivables balance
+Trade Creditors,Current Liabilities,50000,0,Debit balance in liability ledger
+Sales Revenue,Income,25000,0,Income ledger debit balance
+Rent Expense,Expenses,0,10000,Expense ledger credit balance
+Suspense Account,Suspense,75000,0,Suspense balance open
+Unsecured Loan,Loans,200000,0,Loan ledger debit balance
+Fixed Assets,Fixed Assets,750000,0,Material asset balance
+Provision for Expenses,Current Liabilities,0,300000,Provision balance
+Round Balance Expense,Expenses,100000,0,Round number balance
+,Current Assets,20000,0,Missing ledger name
+Inventory Stock,Current Assets,0,5000,Credit balance in asset ledger
+GST Payable,Current Liabilities,0,90000,Normal payable
+Misc Income,Income,0,15000,Normal income credit
 """,
 encoding="utf-8",
 )
 
-print("Fixed Asset Audit module applied.")
+print("Trial Balance Review module applied.")
 print("Updated:")
-print(f"- {CHECKS_DIR / 'fixed_asset_checks.py'}")
+print(f"- {CHECKS_DIR / 'trial_balance_checks.py'}")
 print(f"- {RUNNER}")
 print(f"- {AUDIT_RUNS}")
 print(f"- {FRONTEND}")
-print(f"- {SAMPLE_DIR / 'fixed_asset_register_edge_cases.csv'}")
+print(f"- {SAMPLE_DIR / 'trial_balance_edge_cases.csv'}")
