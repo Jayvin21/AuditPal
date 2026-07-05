@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -16,14 +16,37 @@ ALLOWED_STATUSES = {
 }
 
 
-@router.get("/{workspace_id}", response_model=list[FindingResponse])
-def list_findings(workspace_id: int, db: Session = Depends(get_db)):
-    return (
-        db.query(Finding)
-        .filter(Finding.workspace_id == workspace_id)
-        .order_by(Finding.id.desc())
-        .all()
-    )
+@router.get("/{workspace_id}")
+def list_findings(
+    workspace_id: int,
+    audit_run_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Finding).filter(Finding.workspace_id == workspace_id)
+
+    if audit_run_id is not None:
+        query = query.filter(Finding.audit_run_id == audit_run_id)
+
+    findings = query.order_by(Finding.id.desc()).all()
+
+    return [
+        {
+            "id": finding.id,
+            "workspace_id": finding.workspace_id,
+            "audit_run_id": finding.audit_run_id,
+            "finding_type": finding.finding_type,
+            "risk_level": finding.risk_level,
+            "title": finding.title,
+            "description": finding.description,
+            "source_record_id": finding.source_record_id,
+            "matched_record_id": finding.matched_record_id,
+            "evidence": finding.evidence,
+            "status": finding.status,
+            "reviewer_note": finding.reviewer_note,
+            "created_at": finding.created_at,
+        }
+        for finding in findings
+    ]
 
 
 @router.patch("/{finding_id}", response_model=FindingResponse)

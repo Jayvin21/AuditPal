@@ -69,6 +69,35 @@ def _gstin_valid(gstin):
     return True
 
 
+def _money(value):
+    amount = _amount(value)
+    if amount is None:
+        return ""
+    return f"₹{amount:,.0f}"
+
+
+def _context_title(base_title, record):
+    document_id = _norm(getattr(record, "document_id", None))
+    party_name = _norm(getattr(record, "party_name", None))
+    amount = _money(getattr(record, "amount", None))
+    source_row = getattr(record, "source_row", None)
+
+    bits = []
+    if document_id:
+        bits.append(document_id)
+    if party_name:
+        bits.append(party_name)
+    if amount:
+        bits.append(amount)
+    if source_row:
+        bits.append(f"row {source_row}")
+
+    if not bits:
+        return base_title
+
+    return f"{base_title} — {' · '.join(bits[:3])}"
+
+
 def _finding(record, finding_type, risk_level, title, description, extra=None):
     evidence = {
         "record_id": getattr(record, "id", None),
@@ -87,7 +116,36 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
         "source_record_id": getattr(record, "id", None),
         "finding_type": finding_type,
         "risk_level": risk_level,
-        "title": title,
+        "title": _context_title(title, record),
+        "description": description,
+        "evidence": evidence,
+    }
+
+
+def _group_finding(records, finding_type, risk_level, title, description, extra=None):
+    first = records[0]
+    source_rows = [getattr(record, "source_row", None) for record in records]
+    record_ids = [getattr(record, "id", None) for record in records]
+
+    evidence = {
+        "record_ids": record_ids,
+        "source_rows": source_rows,
+        "duplicate_count": len(records),
+        "document_id": getattr(first, "document_id", None),
+        "party_name": getattr(first, "party_name", None),
+        "transaction_date": _date_string(getattr(first, "transaction_date", None)),
+        "amount": getattr(first, "amount", None),
+        "gstin": getattr(first, "gstin", None),
+    }
+
+    if extra:
+        evidence.update(extra)
+
+    return {
+        "source_record_id": getattr(first, "id", None),
+        "finding_type": finding_type,
+        "risk_level": risk_level,
+        "title": _context_title(title, first),
         "description": description,
         "evidence": evidence,
     }
@@ -224,32 +282,29 @@ def run_sales_checks(records):
 
     for invoice, duplicate_records in invoice_index.items():
         if len(duplicate_records) > 1:
-            for record in duplicate_records:
-                findings.append(_finding(
-                    record,
-                    "duplicate_sales_invoice",
-                    "high",
-                    "Duplicate sales invoice number",
-                    "Same sales invoice/reference number appears more than once.",
-                    {"invoice": invoice, "duplicate_count": len(duplicate_records)},
-                ))
+            findings.append(_group_finding(
+                duplicate_records,
+                "duplicate_sales_invoice",
+                "high",
+                f"Duplicate sales invoice {getattr(duplicate_records[0], 'document_id', invoice)}",
+                "Same sales invoice/reference number appears more than once. Review the listed source rows together instead of treating each row as a separate issue.",
+                {"invoice": invoice},
+            ))
 
     for key, repeated_records in customer_amount_date_index.items():
         if len(repeated_records) > 1:
             customer_name, amount, txn_date = key
-            for record in repeated_records:
-                findings.append(_finding(
-                    record,
-                    "repeated_sales_pattern",
-                    "medium",
-                    "Repeated same-customer same-amount sale",
-                    "Same customer, same amount, and same date appears multiple times. Check for duplicate billing.",
-                    {
-                        "customer_name": customer_name,
-                        "amount": amount,
-                        "transaction_date": txn_date,
-                        "duplicate_count": len(repeated_records),
-                    },
-                ))
+            findings.append(_group_finding(
+                repeated_records,
+                "repeated_sales_pattern",
+                "medium",
+                f"Repeated sales pattern for {customer_name}",
+                "Same customer, same amount, and same date appears multiple times. Check for duplicate billing.",
+                {
+                    "customer_name": customer_name,
+                    "amount": amount,
+                    "transaction_date": txn_date,
+                },
+            ))
 
     return findings

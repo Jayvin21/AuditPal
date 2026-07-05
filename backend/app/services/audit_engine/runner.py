@@ -149,8 +149,9 @@ def parse_workspace_files(workspace_id: int, db: Session, force_reparse: bool = 
 
 
 def clear_findings(workspace_id: int, db: Session):
-    db.query(Finding).filter(Finding.workspace_id == workspace_id).delete()
-    db.commit()
+    # Keep previous audit-run findings so review state/history is preserved.
+    # Individual runs can be deleted from the Audit Runs history.
+    return None
 
 
 def save_findings(

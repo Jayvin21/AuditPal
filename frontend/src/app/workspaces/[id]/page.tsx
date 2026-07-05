@@ -51,6 +51,7 @@ type RecordRow = {
 
 type Finding = {
   id: number;
+  audit_run_id: number | null;
   finding_type: string;
   risk_level: string;
   title: string;
@@ -74,6 +75,20 @@ type AuditRunResponse = {
     issues_found: number;
     risk_counts?: Record<string, number>;
   };
+};
+
+type AuditRunItem = {
+  id: number;
+  workspace_id: number;
+  audit_type: string;
+  status: string;
+  total_records: number;
+  checked_records: number;
+  issues_found: number;
+  unchecked_records: number;
+  created_at: string;
+  status_counts?: Record<string, number>;
+  risk_counts?: Record<string, number>;
 };
 
 type ColumnMappingResponse = {
@@ -174,6 +189,8 @@ export default function WorkspaceDetailPage() {
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [auditSummary, setAuditSummary] = useState<AuditRunResponse | null>(null);
+  const [auditRuns, setAuditRuns] = useState<AuditRunItem[]>([]);
+  const [selectedAuditRunId, setSelectedAuditRunId] = useState<number | null>(null);
 
   const [selectedMappingFileId, setSelectedMappingFileId] = useState<number | null>(null);
   const [mappingPreview, setMappingPreview] = useState<ColumnMappingResponse | null>(null);
@@ -181,7 +198,7 @@ export default function WorkspaceDetailPage() {
 
   const [riskFilter, setRiskFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("needs_review");
 
   const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
   const [statusMessage, setStatusMessage] = useState("");
@@ -189,17 +206,23 @@ export default function WorkspaceDetailPage() {
   const [updatingFindingId, setUpdatingFindingId] = useState<number | null>(null);
 
   async function refreshAll() {
-    const [workspaceRes, filesRes, recordsRes, findingsRes] = await Promise.all([
+    const [workspaceRes, filesRes, recordsRes, findingsRes, auditRunsRes] = await Promise.all([
       api.get(`/workspaces/${workspaceId}`),
       api.get(`/records/files/${workspaceId}`),
       api.get(`/records/workspace/${workspaceId}`),
       api.get(`/findings/${workspaceId}`),
+      api.get(`/audit-runs/${workspaceId}`),
     ]);
 
     setWorkspace(workspaceRes.data);
     setFiles(filesRes.data);
     setRecords(recordsRes.data);
     setFindings(findingsRes.data);
+    setAuditRuns(auditRunsRes.data);
+
+    if (!selectedAuditRunId && auditRunsRes.data.length > 0) {
+      setSelectedAuditRunId(auditRunsRes.data[0].id);
+    }
 
     setNoteDrafts((prev) => {
       const next = { ...prev };
@@ -220,6 +243,37 @@ export default function WorkspaceDetailPage() {
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setSelectedFile(event.target.files?.[0] ?? null);
+  }
+
+
+  async function deleteUploadedFile(fileId: number) {
+    const confirmed = window.confirm(
+      "Delete this file? This will also clear extracted records, findings, and audit runs for this workspace."
+    );
+
+    if (!confirmed) return;
+
+    setBusy(true);
+    setStatusMessage("Deleting file and dependent audit data...");
+
+    try {
+      await api.delete(`/uploads/${fileId}`);
+
+      if (selectedMappingFileId === fileId) {
+        setSelectedMappingFileId(null);
+        setMappingPreview(null);
+        setMappingDraft({});
+      }
+
+      setAuditSummary(null);
+      setStatusMessage("File deleted. Extracted records, findings, and audit runs were cleared to prevent stale audit results.");
+      await refreshAll();
+      setActiveSection("files");
+    } catch {
+      setStatusMessage("File delete failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadFile() {
@@ -325,6 +379,7 @@ export default function WorkspaceDetailPage() {
     try {
       const res = await api.post(`/audit-runs/${workspaceId}/run-purchase-audit`);
       setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
       setStatusMessage("Purchase audit completed.");
       await refreshAll();
       setActiveSection("findings");
@@ -344,6 +399,7 @@ export default function WorkspaceDetailPage() {
     try {
       const res = await api.post(`/audit-runs/${workspaceId}/run-sales-audit`);
       setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
       setStatusMessage("Sales audit completed.");
       await refreshAll();
       setActiveSection("findings");
@@ -361,6 +417,7 @@ export default function WorkspaceDetailPage() {
     try {
       const res = await api.post(`/audit-runs/${workspaceId}/run-expense-audit`);
       setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
       setStatusMessage("Expense audit completed.");
       await refreshAll();
       setActiveSection("findings");
@@ -378,6 +435,7 @@ export default function WorkspaceDetailPage() {
     try {
       const res = await api.post(`/audit-runs/${workspaceId}/run-bank-reconciliation`);
       setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
       setStatusMessage("Bank reconciliation completed.");
       await refreshAll();
       setActiveSection("findings");
@@ -402,6 +460,34 @@ export default function WorkspaceDetailPage() {
     );
   }
 
+
+  async function deleteAuditRun(auditRunId: number) {
+    const confirmed = window.confirm(
+      "Delete this audit run? This will delete only this run and its findings/review notes."
+    );
+
+    if (!confirmed) return;
+
+    setBusy(true);
+    setStatusMessage("Deleting audit run...");
+
+    try {
+      await api.delete(`/audit-runs/${auditRunId}`);
+
+      if (selectedAuditRunId === auditRunId) {
+        setSelectedAuditRunId(null);
+      }
+
+      setAuditSummary(null);
+      setStatusMessage("Audit run deleted.");
+      await refreshAll();
+    } catch {
+      setStatusMessage("Could not delete audit run.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateFindingStatus(findingId: number, status: string) {
     setUpdatingFindingId(findingId);
     try {
@@ -424,21 +510,28 @@ export default function WorkspaceDetailPage() {
     }
   }
 
-  const high = findings.filter((f) => f.risk_level === "high").length;
-  const medium = findings.filter((f) => f.risk_level === "medium").length;
-  const low = findings.filter((f) => f.risk_level === "low").length;
+  const visibleFindings = selectedAuditRunId
+    ? findings.filter((finding) => finding.audit_run_id === selectedAuditRunId)
+    : findings;
+
+  const high = visibleFindings.filter((f) => f.risk_level === "high").length;
+  const medium = visibleFindings.filter((f) => f.risk_level === "medium").length;
+  const low = visibleFindings.filter((f) => f.risk_level === "low").length;
 
   const mappedFiles = files.filter((file) => file.status === "mapped" || file.status === "parsed").length;
   const parsedFiles = files.filter((file) => file.status === "parsed").length;
-  const needsReview = findings.filter((finding) => finding.status === "needs_review").length;
-  const confirmedIssues = findings.filter((finding) => finding.status === "confirmed_issue").length;
+  const needsReview = visibleFindings.filter((finding) => finding.status === "needs_review").length;
+  const confirmedIssues = visibleFindings.filter((finding) => finding.status === "confirmed_issue").length;
+  const falsePositive = visibleFindings.filter((finding) => finding.status === "false_positive").length;
+  const needsClarification = visibleFindings.filter((finding) => finding.status === "needs_client_clarification").length;
+  const resolved = visibleFindings.filter((finding) => finding.status === "resolved").length;
 
   const findingTypes = useMemo(
-    () => Array.from(new Set(findings.map((f) => f.finding_type))).sort(),
-    [findings]
+    () => Array.from(new Set(visibleFindings.map((f) => f.finding_type))).sort(),
+    [visibleFindings]
   );
 
-  const filteredFindings = findings.filter((finding) => {
+  const filteredFindings = visibleFindings.filter((finding) => {
     const riskMatch = riskFilter === "all" || finding.risk_level === riskFilter;
     const typeMatch = typeFilter === "all" || finding.finding_type === typeFilter;
     const statusMatch = statusFilter === "all" || finding.status === statusFilter;
@@ -571,6 +664,7 @@ export default function WorkspaceDetailPage() {
                 setFileType={setFileType}
                 handleFileChange={handleFileChange}
                 uploadFile={uploadFile}
+                deleteUploadedFile={deleteUploadedFile}
                 openMapping={openMapping}
                 setActiveSection={setActiveSection}
               />
@@ -589,6 +683,11 @@ export default function WorkspaceDetailPage() {
 
             {activeSection === "audit" && (
               <AuditSection
+                files={files}
+                auditRuns={auditRuns}
+                selectedAuditRunId={selectedAuditRunId}
+                setSelectedAuditRunId={setSelectedAuditRunId}
+                deleteAuditRun={deleteAuditRun}
                 busy={busy}
                 auditSummary={auditSummary}
                 parseFiles={parseFiles}
@@ -607,6 +706,11 @@ export default function WorkspaceDetailPage() {
                 high={high}
                 medium={medium}
                 low={low}
+                needsReview={needsReview}
+                confirmedIssues={confirmedIssues}
+                falsePositive={falsePositive}
+                needsClarification={needsClarification}
+                resolved={resolved}
                 riskFilter={riskFilter}
                 typeFilter={typeFilter}
                 statusFilter={statusFilter}
@@ -830,6 +934,7 @@ function FilesSection({
   setFileType,
   handleFileChange,
   uploadFile,
+  deleteUploadedFile,
   openMapping,
   setActiveSection,
 }: {
@@ -840,6 +945,7 @@ function FilesSection({
   setFileType: (value: string) => void;
   handleFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   uploadFile: () => void;
+  deleteUploadedFile: (fileId: number) => void;
   openMapping: (fileId: number) => void;
   setActiveSection: (section: string) => void;
 }) {
@@ -921,15 +1027,25 @@ function FilesSection({
                         {file.file_type} · {file.status}
                       </p>
                     </div>
-                    <button
-                      onClick={() => {
-                        openMapping(file.id);
-                        setActiveSection("mapping");
-                      }}
-                      className="rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
-                    >
-                      Map Columns
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => {
+                          openMapping(file.id);
+                          setActiveSection("mapping");
+                        }}
+                        className="rounded-lg border border-[#BFD8CB] bg-white px-3 py-2 text-xs font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
+                      >
+                        Map Columns
+                      </button>
+
+                      <button
+                        onClick={() => deleteUploadedFile(file.id)}
+                        disabled={busy}
+                        className="rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
+                      >
+                        Delete File
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -965,7 +1081,7 @@ function MappingSection({
         {!mappingPreview ? (
           <EmptyState text="Select Map Columns from the Files section to start mapping an uploaded file." />
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr]">
+          <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
             <div>
               <div className="mb-5 flex items-center gap-2">
                 <Columns3 size={18} className="text-[#358873]" />
@@ -998,7 +1114,7 @@ function MappingSection({
                   </div>
                 ))}
 
-                <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-3">
                   <button
                     onClick={saveMapping}
                     disabled={busy}
@@ -1018,7 +1134,7 @@ function MappingSection({
               </div>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <h3 className="mb-3 font-medium">Preview Rows</h3>
               <div className="max-h-[560px] overflow-auto rounded-xl border border-[#D6E6DD]">
                 <table className="w-full text-left text-xs">
@@ -1053,6 +1169,11 @@ function MappingSection({
 }
 
 function AuditSection({
+  files,
+  auditRuns,
+  selectedAuditRunId,
+  setSelectedAuditRunId,
+  deleteAuditRun,
   busy,
   auditSummary,
   parseFiles,
@@ -1061,6 +1182,11 @@ function AuditSection({
   runExpenseAudit,
   runBankReconciliation,
 }: {
+  files: UploadedFile[];
+  auditRuns?: AuditRunItem[];
+  selectedAuditRunId: number | null;
+  setSelectedAuditRunId: (id: number | null) => void;
+  deleteAuditRun: (id: number) => void;
   busy: boolean;
   auditSummary: AuditRunResponse | null;
   parseFiles: () => void;
@@ -1069,16 +1195,95 @@ function AuditSection({
   runExpenseAudit: () => void;
   runBankReconciliation: () => void;
 }) {
+  const runHistory = auditRuns ?? [];
+  const recommendedModule = inferRecommendedAuditModule(files);
+  const [selectedModule, setSelectedModule] = useState(recommendedModule);
+
+  useEffect(() => {
+    setSelectedModule(recommendedModule);
+  }, [recommendedModule]);
+
+  const selectedRun = runHistory.find((run) => run.id === selectedAuditRunId) ?? runHistory[0] ?? null;
+
+  const moduleOptions = [
+    {
+      key: "purchase",
+      label: "Purchase Audit",
+      description: "Checks purchase registers for missing fields, GSTIN issues, duplicates, high-value entries, and year-end risks.",
+      run: runPurchaseAudit,
+    },
+    {
+      key: "sales",
+      label: "Sales Audit",
+      description: "Checks sales registers for duplicate invoices, GSTIN issues, cancellations, returns, high-value invoices, and cut-off risk.",
+      run: runSalesAudit,
+    },
+    {
+      key: "expense",
+      label: "Expense Audit",
+      description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
+      run: runExpenseAudit,
+    },
+    {
+      key: "bank",
+      label: "Bank Reconciliation",
+      description: "Compares bank statements with cash/bank ledgers and flags unmatched or repeated entries.",
+      run: runBankReconciliation,
+    },
+  ];
+
+  const selected = moduleOptions.find((module) => module.key === selectedModule) ?? moduleOptions[0];
+
+  const coverageSource =
+    auditSummary && auditSummary.audit_run_id === selectedAuditRunId
+      ? auditSummary.coverage
+      : selectedRun
+        ? {
+            total_records: selectedRun.total_records,
+            checked_records: selectedRun.checked_records,
+            unchecked_records: selectedRun.unchecked_records,
+            issues_found: selectedRun.issues_found,
+          }
+        : null;
+
+  const checkedRecords =
+    coverageSource?.checked_records ??
+    coverageSource?.purchase_records_checked ??
+    coverageSource?.sales_records_checked ??
+    coverageSource?.expense_records_checked ??
+    0;
+
   return (
     <SectionShell
       title="Audit Runs"
-      subtitle="Run deterministic audit modules after records are extracted."
+      subtitle="Run audit modules, revisit previous runs, and continue review where you left off."
     >
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
         <Card>
           <div className="mb-5 flex items-center gap-2">
             <Play size={18} className="text-[#358873]" />
             <h2 className="font-medium">Run audit module</h2>
+          </div>
+
+          <label className="mb-2 block text-sm text-[#5F7D70]">
+            Audit module
+          </label>
+
+          <select
+            value={selectedModule}
+            onChange={(event) => setSelectedModule(event.target.value)}
+            className="mb-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
+          >
+            {moduleOptions.map((module) => (
+              <option key={module.key} value={module.key}>
+                {module.label}
+              </option>
+            ))}
+          </select>
+
+          <div className="mb-4 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4 text-sm leading-6 text-[#5F7D70]">
+            <p className="font-medium text-[#17352E]">{selected.label}</p>
+            <p className="mt-1">{selected.description}</p>
           </div>
 
           <div className="space-y-3">
@@ -1091,63 +1296,99 @@ function AuditSection({
             </button>
 
             <button
-              onClick={runPurchaseAudit}
+              onClick={selected.run}
               disabled={busy}
               className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
             >
-              Run Purchase Audit
-            </button>
-
-            <button
-              onClick={runSalesAudit}
-              disabled={busy}
-              className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
-            >
-              Run Sales Audit
-            </button>
-
-            <button
-              onClick={runExpenseAudit}
-              disabled={busy}
-              className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
-            >
-              Run Expense Audit
-            </button>
-
-            <button
-              onClick={runBankReconciliation}
-              disabled={busy}
-              className="w-full rounded-xl border border-[#B4D6C1] bg-[#EDF6F0] px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#DFEAE2] disabled:opacity-50"
-            >
-              Run Bank Reconciliation
+              Run {selected.label}
             </button>
           </div>
         </Card>
 
-        <Card>
-          <div className="mb-4 flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-[#358873]" />
-            <h2 className="font-medium">Latest audit coverage</h2>
-          </div>
-
-          {!auditSummary ? (
-            <EmptyState text="No audit run in this session yet. Run Purchase Audit or Bank Reconciliation to see coverage." />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-4">
-              <Metric label="Total" value={String(auditSummary.coverage.total_records)} />
-              <Metric
-                label="Checked"
-                value={String(
-                  auditSummary.coverage.purchase_records_checked ??
-                    auditSummary.coverage.checked_records ??
-                    0
-                )}
-              />
-              <Metric label="Unchecked" value={String(auditSummary.coverage.unchecked_records)} />
-              <Metric label="Issues" value={String(auditSummary.coverage.issues_found)} />
+        <div className="space-y-6">
+          <Card>
+            <div className="mb-4 flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-[#358873]" />
+              <h2 className="font-medium">Selected audit coverage</h2>
             </div>
-          )}
-        </Card>
+
+            {!coverageSource ? (
+              <EmptyState text="No audit run selected yet. Extract records, then run the recommended audit module." />
+            ) : (
+              <div className="grid gap-3 md:grid-cols-4">
+                <Metric label="Total" value={String(coverageSource.total_records)} />
+                <Metric label="Checked" value={String(checkedRecords)} />
+                <Metric label="Unchecked" value={String(coverageSource.unchecked_records)} />
+                <Metric label="Issues" value={String(coverageSource.issues_found)} />
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-medium">Audit run history</h2>
+                <p className="mt-1 text-sm text-[#5F7D70]">
+                  Select a run to view its findings and continue review.
+                </p>
+              </div>
+            </div>
+
+            {runHistory.length === 0 ? (
+              <EmptyState text="No audit runs yet." />
+            ) : (
+              <div className="space-y-3">
+                {runHistory.map((run) => {
+                  const active = run.id === selectedAuditRunId;
+                  const statusCounts = run.status_counts ?? {};
+                  const open = statusCounts.needs_review ?? 0;
+                  const resolved = statusCounts.resolved ?? 0;
+                  const confirmed = statusCounts.confirmed_issue ?? 0;
+
+                  return (
+                    <div
+                      key={run.id}
+                      className={
+                        active
+                          ? "rounded-2xl border border-[#358873] bg-[#EDF6F0] p-4"
+                          : "rounded-2xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"
+                      }
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <button
+                          onClick={() => setSelectedAuditRunId(run.id)}
+                          className="text-left"
+                        >
+                          <p className="font-medium text-[#17352E]">
+                            {formatAuditType(run.audit_type)} #{run.id}
+                          </p>
+                          <p className="mt-1 text-xs text-[#5F7D70]">
+                            {formatDateTime(run.created_at)} · {run.status}
+                          </p>
+                        </button>
+
+                        <button
+                          onClick={() => deleteAuditRun(run.id)}
+                          disabled={busy}
+                          className="rounded-lg border border-[#F3CACA] bg-white px-3 py-2 text-xs font-medium text-[#B42318] transition hover:bg-[#FDE8E8] disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 md:grid-cols-4">
+                        <MiniCount label="Issues" value={run.issues_found} />
+                        <MiniCount label="Open" value={open} />
+                        <MiniCount label="Confirmed" value={confirmed} />
+                        <MiniCount label="Resolved" value={resolved} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
     </SectionShell>
   );
@@ -1159,6 +1400,11 @@ function FindingsSection({
   high,
   medium,
   low,
+  needsReview,
+  confirmedIssues,
+  falsePositive,
+  needsClarification,
+  resolved,
   riskFilter,
   typeFilter,
   statusFilter,
@@ -1179,6 +1425,11 @@ function FindingsSection({
   high: number;
   medium: number;
   low: number;
+  needsReview: number;
+  confirmedIssues: number;
+  falsePositive: number;
+  needsClarification: number;
+  resolved: number;
   riskFilter: string;
   typeFilter: string;
   statusFilter: string;
@@ -1223,6 +1474,19 @@ function FindingsSection({
               <Download size={16} />
               Export PDF
             </button>
+          </div>
+        </div>
+
+        <div className="mb-5 rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-4">
+          <p className="mb-3 text-xs font-medium uppercase tracking-[0.16em] text-[#6B8E7F]">
+            Review workload
+          </p>
+          <div className="grid gap-3 md:grid-cols-5">
+            <StatusCount label="Needs review" value={needsReview} active={statusFilter === "needs_review"} onClick={() => setStatusFilter("needs_review")} />
+            <StatusCount label="Confirmed" value={confirmedIssues} active={statusFilter === "confirmed_issue"} onClick={() => setStatusFilter("confirmed_issue")} />
+            <StatusCount label="False positive" value={falsePositive} active={statusFilter === "false_positive"} onClick={() => setStatusFilter("false_positive")} />
+            <StatusCount label="Clarification" value={needsClarification} active={statusFilter === "needs_client_clarification"} onClick={() => setStatusFilter("needs_client_clarification")} />
+            <StatusCount label="Resolved" value={resolved} active={statusFilter === "resolved"} onClick={() => setStatusFilter("resolved")} />
           </div>
         </div>
 
@@ -1289,7 +1553,7 @@ function FindingsSection({
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <AlertTriangle size={16} className={riskClass(finding.risk_level)} />
-                    <h3 className="font-medium text-[#17352E]">{finding.title}</h3>
+                    <h3 className="font-medium text-[#17352E]">{findingDisplayTitle(finding)}</h3>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -1301,6 +1565,12 @@ function FindingsSection({
                     </span>
                   </div>
                 </div>
+
+                {findingMeta(finding) && (
+                  <p className="mb-2 text-xs font-medium text-[#6B8E7F]">
+                    {findingMeta(finding)}
+                  </p>
+                )}
 
                 <p className="text-sm leading-6 text-[#5F7D70]">
                   {finding.description}
@@ -1508,7 +1778,7 @@ function SectionShell({
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">
+    <div className="overflow-hidden rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">
       {children}
     </div>
   );
@@ -1575,6 +1845,63 @@ function RiskBox({
       <p className="text-sm font-medium">{label}</p>
       <p className="mt-2 text-3xl font-semibold">{value}</p>
     </div>
+  );
+}
+
+
+
+function MiniCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-[#D6E6DD] bg-white/80 px-3 py-2">
+      <p className="text-xs text-[#6B8E7F]">{label}</p>
+      <p className="mt-1 font-semibold text-[#17352E]">{value}</p>
+    </div>
+  );
+}
+
+function formatAuditType(type: string) {
+  if (type === "purchase_audit") return "Purchase Audit";
+  if (type === "sales_audit") return "Sales Audit";
+  if (type === "expense_audit") return "Expense Audit";
+  if (type === "bank_reconciliation") return "Bank Reconciliation";
+  return type;
+}
+
+function formatDateTime(value: string) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return value;
+  }
+}
+
+function StatusCount({
+  label,
+  value,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        active
+          ? "rounded-2xl bg-[#358873] p-3 text-left text-white shadow-sm"
+          : "rounded-2xl border border-[#D6E6DD] bg-white p-3 text-left text-[#42685B] transition hover:bg-[#EDF6F0]"
+      }
+    >
+      <p className="text-xs font-medium opacity-80">{label}</p>
+      <p className="mt-1 text-2xl font-semibold">{value}</p>
+    </button>
   );
 }
 
@@ -1656,6 +1983,76 @@ function getNextAction({
     description: "Export the findings as CSV or generate a PDF audit report for documentation.",
     section: "reports",
   };
+}
+
+
+function inferRecommendedAuditModule(files?: UploadedFile[]) {
+  if (!files || !files.length) return "purchase";
+
+  const candidates = files
+    .filter((file) => file.status === "parsed" || file.status === "uploaded")
+    .sort((a, b) => b.id - a.id);
+
+  const latest = candidates[0] ?? files[files.length - 1];
+  const type = latest?.file_type?.toLowerCase() ?? "";
+
+  if (type.includes("sales") || type.includes("customer")) return "sales";
+  if (type.includes("expense") || type.includes("gl") || type.includes("ledger_vouchers")) return "expense";
+  if (type.includes("bank") || type.includes("cash_bank") || type.includes("tally_bank")) return "bank";
+  if (type.includes("purchase") || type.includes("vendor")) return "purchase";
+
+  return "purchase";
+}
+
+function findingDisplayTitle(finding: Finding) {
+  const evidence = finding.evidence ?? {};
+  const documentId = getEvidenceValue(evidence, "document_id");
+  const partyName = getEvidenceValue(evidence, "party_name");
+  const row = getEvidenceValue(evidence, "source_row");
+  const rows = getEvidenceValue(evidence, "source_rows");
+
+  const titleAlreadyHasContext =
+    (documentId && finding.title.includes(documentId)) ||
+    (partyName && finding.title.includes(partyName));
+
+  if (titleAlreadyHasContext) return finding.title;
+
+  const bits = [];
+  if (documentId) bits.push(documentId);
+  if (partyName) bits.push(partyName);
+  if (row) bits.push(`row ${row}`);
+  if (!row && rows) bits.push(`rows ${Array.isArray(rows) ? rows.join(", ") : rows}`);
+
+  if (!bits.length) return finding.title;
+
+  return `${finding.title} — ${bits.slice(0, 2).join(" · ")}`;
+}
+
+function findingMeta(finding: Finding) {
+  const evidence = finding.evidence ?? {};
+  const bits = [];
+
+  const documentId = getEvidenceValue(evidence, "document_id");
+  const partyName = getEvidenceValue(evidence, "party_name");
+  const amount = getEvidenceValue(evidence, "amount");
+  const date = getEvidenceValue(evidence, "transaction_date");
+  const row = getEvidenceValue(evidence, "source_row");
+  const rows = getEvidenceValue(evidence, "source_rows");
+
+  if (documentId) bits.push(`Document: ${documentId}`);
+  if (partyName) bits.push(`Party: ${partyName}`);
+  if (date) bits.push(`Date: ${date}`);
+  if (amount !== "" && amount !== null && amount !== undefined) bits.push(`Amount: ₹${Number(amount).toLocaleString("en-IN")}`);
+  if (row) bits.push(`Row: ${row}`);
+  if (!row && rows) bits.push(`Rows: ${Array.isArray(rows) ? rows.join(", ") : rows}`);
+
+  return bits.join(" · ");
+}
+
+function getEvidenceValue(evidence: Record<string, unknown>, key: string) {
+  const value = evidence[key];
+  if (value === null || value === undefined || value === "") return "";
+  return value as string | number | unknown[];
 }
 
 function riskClass(risk: string) {
