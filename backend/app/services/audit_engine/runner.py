@@ -9,6 +9,8 @@ from app.models.file_column_mapping import FileColumnMapping
 from app.models.finding import Finding
 from app.models.uploaded_file import UploadedFile
 from app.services.audit_engine.checks.basic_purchase_checks import run_basic_purchase_checks
+from app.services.audit_engine.checks.expense_checks import run_expense_checks
+from app.services.audit_engine.checks.sales_checks import run_sales_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -19,6 +21,23 @@ PURCHASE_FILE_TYPES = {
     "purchase_ledger",
     "expense_ledger",
     "expenses",
+}
+
+
+EXPENSE_FILE_TYPES = {
+    "expense_ledger",
+    "expenses",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "tally_purchase_register",
+}
+
+
+SALES_FILE_TYPES = {
+    "sales_register",
+    "generic_sales_register",
+    "sales",
+    "sap_customer_line_items",
 }
 
 BANK_FILE_TYPES = {
@@ -242,6 +261,158 @@ def run_purchase_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "purchase_records_checked": len(purchase_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_sales_audit(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    sales_records = [
+        record for record in records
+        if record.record_type.lower() in SALES_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not sales_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="sales_audit",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "No sales records found. Upload a file tagged as generic_sales_register or sap_customer_line_items.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "sales_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_sales_checks(sales_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="sales_audit",
+        status="completed",
+        total_records=len(sales_records),
+        checked_records=len(sales_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(sales_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Sales audit completed using uploaded sales records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "sales_records_checked": len(sales_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_expense_audit(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    expense_records = [
+        record for record in records
+        if record.record_type.lower() in EXPENSE_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not expense_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="expense_audit",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "No expense records found. Upload a file tagged as expense_ledger, tally_ledger_vouchers, or sap_gl_line_items.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "expense_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_expense_checks(expense_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="expense_audit",
+        status="completed",
+        total_records=len(expense_records),
+        checked_records=len(expense_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(expense_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Expense audit completed using uploaded ledger records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "expense_records_checked": len(expense_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),

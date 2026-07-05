@@ -335,6 +335,42 @@ export default function WorkspaceDetailPage() {
     }
   }
 
+
+
+  async function runSalesAudit() {
+    setBusy(true);
+    setStatusMessage("Running sales audit...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-sales-audit`);
+      setAuditSummary(res.data);
+      setStatusMessage("Sales audit completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Sales audit failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runExpenseAudit() {
+    setBusy(true);
+    setStatusMessage("Running expense audit...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-expense-audit`);
+      setAuditSummary(res.data);
+      setStatusMessage("Expense audit completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Expense audit failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runBankReconciliation() {
     setBusy(true);
     setStatusMessage("Running bank reconciliation...");
@@ -557,6 +593,8 @@ export default function WorkspaceDetailPage() {
                 auditSummary={auditSummary}
                 parseFiles={parseFiles}
                 runPurchaseAudit={runPurchaseAudit}
+                runSalesAudit={runSalesAudit}
+                runExpenseAudit={runExpenseAudit}
                 runBankReconciliation={runBankReconciliation}
               />
             )}
@@ -1019,12 +1057,16 @@ function AuditSection({
   auditSummary,
   parseFiles,
   runPurchaseAudit,
+  runSalesAudit,
+  runExpenseAudit,
   runBankReconciliation,
 }: {
   busy: boolean;
   auditSummary: AuditRunResponse | null;
   parseFiles: () => void;
   runPurchaseAudit: () => void;
+  runSalesAudit: () => void;
+  runExpenseAudit: () => void;
   runBankReconciliation: () => void;
 }) {
   return (
@@ -1054,6 +1096,22 @@ function AuditSection({
               className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
             >
               Run Purchase Audit
+            </button>
+
+            <button
+              onClick={runSalesAudit}
+              disabled={busy}
+              className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+            >
+              Run Sales Audit
+            </button>
+
+            <button
+              onClick={runExpenseAudit}
+              disabled={busy}
+              className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+            >
+              Run Expense Audit
             </button>
 
             <button

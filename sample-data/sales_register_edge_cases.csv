@@ -1,0 +1,12 @@
+Invoice No,Date,Customer Name,GSTIN,Narration,Amount
+S-001,01-04-2025,ABC Retailers,27ABCDE1234F1Z5,Regular B2B sale,11800
+S-002,05-04-2025,Walk-in Customer,,B2C counter sale,5000
+S-003,10-04-2025,XYZ Stores,INVALIDGSTIN,Invalid GSTIN example,25000
+S-004,15-04-2025,Large Customer,27ABCDE1234F1Z5,High value sale,150000
+S-004,15-04-2025,Large Customer,27ABCDE1234F1Z5,Duplicate invoice number,150000
+,20-04-2025,No Invoice Customer,27ABCDE1234F1Z5,Missing invoice no,12000
+S-006,31-03-2026,Year End Customer,27ABCDE1234F1Z5,Year end revenue invoice,90000
+S-007,22-05-2025,Return Customer,27ABCDE1234F1Z5,Sales return / credit note adjustment,-8000
+S-008,25-05-2025,Cancelled Customer,27ABCDE1234F1Z5,Cancelled invoice retained in sales,30000
+S-009,28-05-2025,Repeat Customer,27ABCDE1234F1Z5,Repeated same amount sale,10000
+S-010,28-05-2025,Repeat Customer,27ABCDE1234F1Z5,Repeated same amount sale,10000

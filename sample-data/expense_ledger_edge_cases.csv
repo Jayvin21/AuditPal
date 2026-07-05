@@ -1,0 +1,11 @@
+Voucher No,Date,Particulars,Narration,Debit,Credit
+EXP-001,01-04-2025,Office Supplies,Stationery purchase,2500,0
+EXP-002,15-04-2025,Travel Expense,Uber and food reimbursement,12000,0
+EXP-003,20-04-2025,Petty Cash,Cash payment for repairs,15000,0
+EXP-004,31-03-2026,Consulting Fees,Year end consulting invoice,75000,0
+EXP-004,31-03-2026,Consulting Fees,Duplicate year end consulting invoice,75000,0
+,05-05-2025,Misc Expense,Miscellaneous expense,10000,0
+EXP-006,10-05-2025,,No party name,5000,0
+EXP-007,12-05-2025,Repairs,,3000,0
+EXP-008,14-05-2025,Food Expense,Restaurant client meeting,8000,0
+EXP-009,14-05-2025,Food Expense,Restaurant client meeting,8000,0

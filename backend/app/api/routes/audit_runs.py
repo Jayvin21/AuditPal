@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.models.audit_run import AuditRun
-from app.services.audit_engine.runner import run_bank_reconciliation, run_purchase_audit
+from app.services.audit_engine.runner import run_bank_reconciliation, run_expense_audit, run_purchase_audit, run_sales_audit
 
 router = APIRouter(prefix="/audit-runs", tags=["Audit Runs"])
 
@@ -14,6 +14,22 @@ def run_real_purchase_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_purchase_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Purchase audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-sales-audit")
+def run_real_sales_audit(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_sales_audit(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Sales audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-expense-audit")
+def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_expense_audit(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-bank-reconciliation")
