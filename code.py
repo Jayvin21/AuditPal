@@ -1,466 +1,311 @@
 from pathlib import Path
-import re
 
 ROOT = Path(r"D:\1Workspace\AuditPal")
+README = ROOT / "README.md"
 
-PAGE = ROOT / "frontend" / "src" / "app" / "workspaces" / "[id]" / "page.tsx"
-CSS = ROOT / "frontend" / "src" / "app" / "globals.css"
-
-page = PAGE.read_text(encoding="utf-8")
-css = CSS.read_text(encoding="utf-8")
-
-# ----------------------------------------------------
-# 1. Global animation utilities
-# ----------------------------------------------------
-
-animation_css = r'''
-
-/* Workspace detail polish animations */
-@keyframes auditFadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-
-@keyframes auditFadeDown {
-  from {
-    opacity: 0;
-    transform: translateY(-12px);
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-
-@keyframes auditSlideInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-18px);
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-    filter: blur(0);
-  }
-}
-
-@keyframes auditScaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.975) translateY(10px);
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-    filter: blur(0);
-  }
-}
-
-@keyframes auditSoftPulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(53, 136, 115, 0.16);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(53, 136, 115, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(53, 136, 115, 0);
-  }
-}
-
-.audit-nav-enter {
-  animation: auditFadeDown 520ms ease-out both;
-}
-
-.audit-sidebar-enter {
-  animation: auditSlideInLeft 620ms ease-out both;
-}
-
-.audit-stage-enter {
-  animation: auditFadeUp 620ms ease-out both;
-}
-
-.audit-header-enter {
-  animation: auditScaleIn 650ms ease-out both;
-}
-
-.audit-metrics-enter {
-  animation: auditFadeUp 700ms ease-out both;
-  animation-delay: 80ms;
-}
-
-.audit-status-enter {
-  animation: auditScaleIn 420ms ease-out both;
-}
-
-.audit-section-enter {
-  animation: auditFadeUp 520ms ease-out both;
-}
-
-.audit-card-motion {
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease,
-    background-color 180ms ease;
-}
-
-.audit-card-motion:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 14px 34px rgba(23, 53, 46, 0.075);
-}
-
-.audit-list-item {
-  animation: auditFadeUp 420ms ease-out both;
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease,
-    background-color 160ms ease;
-}
-
-.audit-list-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(23, 53, 46, 0.06);
-}
-
-.audit-button-motion {
-  transition:
-    transform 150ms ease,
-    box-shadow 150ms ease,
-    background-color 150ms ease,
-    border-color 150ms ease;
-}
-
-.audit-button-motion:hover {
-  transform: translateY(-1px);
-}
-
-.audit-button-motion:active {
-  transform: translateY(0);
-}
-
-.audit-active-pulse {
-  animation: auditSoftPulse 1800ms ease-out infinite;
-}
-
-.audit-stagger-1 { animation-delay: 60ms; }
-.audit-stagger-2 { animation-delay: 120ms; }
-.audit-stagger-3 { animation-delay: 180ms; }
-.audit-stagger-4 { animation-delay: 240ms; }
-
-@media (prefers-reduced-motion: reduce) {
-  .audit-nav-enter,
-  .audit-sidebar-enter,
-  .audit-stage-enter,
-  .audit-header-enter,
-  .audit-metrics-enter,
-  .audit-status-enter,
-  .audit-section-enter,
-  .audit-list-item {
-    animation: none !important;
-  }
-
-  .audit-card-motion,
-  .audit-list-item,
-  .audit-button-motion {
-    transition: none !important;
-  }
-
-  .audit-card-motion:hover,
-  .audit-list-item:hover,
-  .audit-button-motion:hover {
-    transform: none !important;
-  }
-}
-'''
-
-if "Workspace detail polish animations" not in css:
-    css = css.rstrip() + "\n" + animation_css + "\n"
-
-CSS.write_text(css, encoding="utf-8")
-
-# ----------------------------------------------------
-# 2. Workspace page container/header/sidebar entrance classes
-# ----------------------------------------------------
-
-page = page.replace(
-    '<main className="relative min-h-screen bg-[#F6FBF8] text-[#17352E]">',
-    '<main className="relative min-h-screen overflow-hidden bg-[#F6FBF8] text-[#17352E]">'
-)
-
-page = page.replace(
-    '<div className="border-b border-[#C8DDD0] bg-white/78 backdrop-blur">',
-    '<div className="audit-nav-enter border-b border-[#C8DDD0] bg-white/78 backdrop-blur">'
-)
-
-page = page.replace(
-    '<div className="sticky top-6 rounded-3xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur">',
-    '<div className="audit-sidebar-enter sticky top-6 rounded-3xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur">'
-)
-
-page = page.replace(
-    '<section className="min-w-0">',
-    '<section className="audit-stage-enter min-w-0">'
-)
-
-page = page.replace(
-    '<header className="mb-5 rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">',
-    '<header className="audit-header-enter audit-card-motion mb-5 rounded-3xl border border-[#C8DDD0] bg-white/88 p-5 shadow-sm backdrop-blur">'
-)
-
-page = page.replace(
-    '<section className="mb-5 grid gap-4 md:grid-cols-4">',
-    '<section className="audit-metrics-enter mb-5 grid gap-4 md:grid-cols-4">'
-)
-
-page = page.replace(
-    '<div className="mb-5 rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 text-sm text-[#5F7D70] shadow-sm backdrop-blur">',
-    '<div className="audit-status-enter mb-5 rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 text-sm text-[#5F7D70] shadow-sm backdrop-blur">'
-)
-
-# ----------------------------------------------------
-# 3. Re-animate active section when switching tabs
-# ----------------------------------------------------
-
-page = page.replace(
-    '''            {activeSection === "overview" && (
-              <OverviewSection''',
-    '''            {activeSection === "overview" && (
-              <div key="overview" className="audit-section-enter">
-                <OverviewSection'''
-)
-
-page = page.replace(
-    '''                setActiveSection={setActiveSection}
-              />
-            )}''',
-    '''                setActiveSection={setActiveSection}
-              />
-              </div>
-            )}''',
-    1
-)
-
-section_replacements = [
-    ("templates", "ImportTemplatesSection"),
-    ("files", "FilesSection"),
-    ("mapping", "MappingSection"),
-    ("audit", "AuditSection"),
-    ("findings", "FindingsSection"),
-    ("records", "RecordsSection"),
-    ("reports", "ReportsSection"),
-    ("chat", "AuditChatSection"),
-]
-
-for section_key, component_name in section_replacements:
-    page = page.replace(
-        f'''            {{activeSection === "{section_key}" && (
-              <{component_name}''',
-        f'''            {{activeSection === "{section_key}" && (
-              <div key="{section_key}" className="audit-section-enter">
-                <{component_name}'''
-    )
-
-# Add closing divs for section blocks using targeted replacements
-page = page.replace(
-    '''              <ImportTemplatesSection />
-            )}''',
-    '''              <ImportTemplatesSection />
-              </div>
-            )}'''
-)
-
-page = page.replace(
-    '''                setActiveSection={setActiveSection}
-              />
-            )}''',
-    '''                setActiveSection={setActiveSection}
-              />
-              </div>
-            )}''',
-    1
-)
-
-page = page.replace(
-    '''                parseFiles={parseFiles}
-              />
-            )}''',
-    '''                parseFiles={parseFiles}
-              />
-              </div>
-            )}''',
-    1
-)
-
-page = page.replace(
-    '''                runBankReconciliation={runBankReconciliation}
-              />
-            )}''',
-    '''                runBankReconciliation={runBankReconciliation}
-              />
-              </div>
-            )}'''
-)
-
-page = page.replace(
-    '''                exportPdf={exportPdf}
-              />
-            )}''',
-    '''                exportPdf={exportPdf}
-              />
-              </div>
-            )}''',
-    1
-)
-
-page = page.replace(
-    '''              <RecordsSection records={records} />
-            )}''',
-    '''              <RecordsSection records={records} />
-              </div>
-            )}'''
-)
-
-page = page.replace(
-    '''                exportPdf={exportPdf}
-              />
-            )}''',
-    '''                exportPdf={exportPdf}
-              />
-              </div>
-            )}''',
-    1
-)
-
-page = page.replace(
-    '''              <AuditChatSection workspaceId={workspaceId} refreshAll={refreshAll} />
-            )}''',
-    '''              <AuditChatSection workspaceId={workspaceId} refreshAll={refreshAll} />
-              </div>
-            )}'''
-)
-
-# ----------------------------------------------------
-# 4. Nav/button/card/list micro-interactions
-# ----------------------------------------------------
-
-# Active sidebar buttons
-page = page.replace(
-    '''? "flex w-full items-center gap-3 rounded-2xl bg-[#358873] px-4 py-3 text-left text-sm font-medium text-white shadow-sm"''',
-    '''? "audit-active-pulse flex w-full items-center gap-3 rounded-2xl bg-[#358873] px-4 py-3 text-left text-sm font-medium text-white shadow-sm transition"'''
-)
-
-page = page.replace(
-    ''': "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium text-[#5F7D70] transition hover:bg-[#EDF6F0] hover:text-[#17352E]"''',
-    ''': "flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium text-[#5F7D70] transition hover:-translate-y-0.5 hover:bg-[#EDF6F0] hover:text-[#17352E]"'''
-)
-
-# Mobile nav
-page = page.replace(
-    '? "rounded-xl bg-[#358873] px-4 py-2 text-sm font-medium text-white"',
-    '? "rounded-xl bg-[#358873] px-4 py-2 text-sm font-medium text-white shadow-sm transition"'
-)
-
-page = page.replace(
-    ': "rounded-xl px-4 py-2 text-sm font-medium text-[#5F7D70]"',
-    ': "rounded-xl px-4 py-2 text-sm font-medium text-[#5F7D70] transition hover:bg-[#EDF6F0]"'
-)
-
-# Common primary and secondary button interactions
-page = page.replace(
-    'className="rounded-xl bg-[#358873] px-5 py-3',
-    'className="audit-button-motion rounded-xl bg-[#358873] px-5 py-3'
-)
-
-page = page.replace(
-    'className="w-full rounded-xl bg-[#358873] px-5 py-3',
-    'className="audit-button-motion w-full rounded-xl bg-[#358873] px-5 py-3'
-)
-
-page = page.replace(
-    'className="rounded-xl border border-[#B4D6C1] bg-white px-5 py-3',
-    'className="audit-button-motion rounded-xl border border-[#B4D6C1] bg-white px-5 py-3'
-)
-
-page = page.replace(
-    'className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3',
-    'className="audit-button-motion w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3'
-)
-
-page = page.replace(
-    'className="rounded-lg border border-[#BFD8CB] bg-white px-3 py-2',
-    'className="audit-button-motion rounded-lg border border-[#BFD8CB] bg-white px-3 py-2'
-)
-
-page = page.replace(
-    'className="rounded-lg border border-[#F3CACA] bg-white px-3 py-2',
-    'className="audit-button-motion rounded-lg border border-[#F3CACA] bg-white px-3 py-2'
-)
-
-# List item cards: files, audit runs, findings, mapping fields, chat bubbles where safe
-list_patterns = [
-    'className="rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-4"',
-    'className="rounded-xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"',
-    'className="rounded-2xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"',
-    'className="rounded-2xl border border-[#D6E6DD] bg-white p-4"',
-    'className="rounded-2xl border border-[#B4D6C1] bg-[#F6FBF8] p-4"',
-]
-
-for pattern in list_patterns:
-    if pattern in page:
-        page = page.replace(pattern, pattern.replace('className="', 'className="audit-list-item '))
-
-# Active audit-run card special branch
-page = page.replace(
-    '? "rounded-2xl border border-[#358873] bg-[#EDF6F0] p-4"',
-    '? "audit-list-item audit-active-pulse rounded-2xl border border-[#358873] bg-[#EDF6F0] p-4"'
-)
-
-# ----------------------------------------------------
-# 5. Upgrade Card component if present
-# ----------------------------------------------------
-
-card_pattern = re.compile(
-    r'''function Card\(\{\s*children,\s*\}:\s*\{\s*children:\s*ReactNode;\s*\}\)\s*\{\s*return\s*\(\s*<div\s+className="([^"]+)"\s*>''',
-    re.MULTILINE
-)
-
-match = card_pattern.search(page)
-if match and "audit-card-motion" not in match.group(1):
-    original_class = match.group(1)
-    upgraded_class = "audit-card-motion " + original_class
-    page = page[:match.start(1)] + upgraded_class + page[match.end(1):]
-
-# ----------------------------------------------------
-# 6. Upgrade Metric component if present
-# ----------------------------------------------------
-
-metric_pattern = 'className="rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur"'
-if metric_pattern in page:
-    page = page.replace(
-        metric_pattern,
-        'className="audit-card-motion rounded-2xl border border-[#C8DDD0] bg-white/88 p-4 shadow-sm backdrop-blur"'
-    )
-
-PAGE.write_text(page, encoding="utf-8")
-
-print("Workspace detail animation patch applied.")
-print("Updated:")
-print("- globals.css animation utilities")
-print("- workspace detail sidebar/header/metrics/sections")
-print("- active-section re-entry animations")
-print("- card/list/button hover micro-interactions")
-print("- reduced-motion support")
+readme = r"""# AuditPal — Agentic Audit Automation Platform
+
+AuditPal is a full-stack audit automation platform built for Excel-heavy audit workflows. It helps auditors upload accounting exports, map messy columns, extract normalized records, run domain-specific audit checks, review risk-ranked findings, use an audit workspace assistant, and export audit reports.
+
+Built by **Jayvin Parmar**.
+
+---
+
+## Preview
+
+![AuditPal Landing Page](screenshots/01_landing_page.png)
+
+---
+
+## Workflow
+
+AuditPal follows a practical audit workflow:
+
+```txt
+Upload Files → Map Columns → Extract Records → Run Audit Modules → Review Findings → Audit Chat → Export Reports
+
+Why AuditPal?
+
+Traditional audit review often depends on manually checking Excel files, Tally exports, SAP line items, bank statements, GST reports, support documents, and ledger data.
+
+AuditPal converts that process into a structured exception-review workflow.
+
+Auditors can:
+
+Upload CSV/XLSX audit files
+Label files by audit source/type
+Map messy real-world columns into normalized audit fields
+Extract records into a database
+Run deterministic audit modules
+Review risk-ranked findings
+Save reviewer decisions and notes
+Use Audit Chat to summarize, retrieve, and act on workspace data
+Export findings as CSV/PDF reports
+Screenshots
+File Upload and Source Classification
+
+Module-Specific Column Mapping
+
+Mapping Preview
+
+Audit Module Selector
+
+Audit Run History
+
+Findings Review
+
+Findings Search and Filters
+
+Evidence Panel
+
+Extracted Records
+
+Reports Export
+
+Audit Chat Summary
+
+Audit Chat Agent Action
+
+Core Features
+Workspace-Based Audit Flow
+
+Each client audit is managed inside a workspace with its own files, records, audit runs, findings, and reports.
+
+File Upload
+
+AuditPal supports multiple accounting and audit file types:
+
+Purchase registers
+Sales registers
+Expense ledgers
+Tally exports
+SAP exports
+Bank statements
+GSTR-2B files
+Fixed asset registers
+Aging reports
+Trial balances
+Support document / OCR extract files
+Column Mapping
+
+Real audit files rarely follow the same column structure. AuditPal includes a column mapping layer for messy CSV/XLSX files.
+
+The mapping system supports module-specific fields such as:
+
+GSTIN, taxable value, invoice value, IGST, CGST, SGST
+PAN, TDS amount, TDS section
+Asset ID, asset cost, depreciation, WDV
+Ledger name, debit balance, credit balance, closing balance
+Due date, days overdue, outstanding amount, aging bucket
+OCR confidence, document type, extracted text
+Audit Modules
+
+AuditPal includes 11 audit/review modules:
+
+Module	Purpose
+Purchase Audit	Detects duplicate invoices, missing fields, high-value purchases, round amounts, GSTIN issues, and year-end risks
+Sales Audit	Reviews sales invoices for missing customer data, duplicates, cancellations, returns, and high-value sales
+Expense Audit	Flags high-value expenses, cash expenses, weak narration, duplicate vouchers, and sensitive spend
+Bank Reconciliation	Matches bank statement entries against books-side bank/cash ledgers
+GST Reconciliation	Compares books-side purchase data with GSTR-2B records
+Ledger Scrutiny	Reviews ledger entries for suspense accounts, journal indicators, cash activity, and weak narration
+TDS Review	Checks possible TDS applicability, missing PAN, missing TDS section, and payment nature issues
+Fixed Asset Audit	Reviews asset capitalization, depreciation, WDV, disposals, and duplicate asset references
+Trial Balance Review	Checks suspense balances, abnormal debit/credit balances, high-value ledgers, and imbalance
+Aging Review	Reviews receivables/payables aging, old balances, overdue items, and high-value outstandings
+Document Matching	Matches book entries against structured OCR/support document extracts
+Findings Review Workflow
+
+Findings are risk-ranked and human-reviewable.
+
+Supported review statuses:
+
+Needs Review
+Confirmed Issue
+False Positive
+Needs Client Clarification
+Resolved
+
+Users can:
+
+Search findings
+Filter by risk/status/type
+Sort findings
+Inspect evidence
+Save reviewer notes
+Update finding status
+Export reports
+Audit Chat Assistant
+
+AuditPal includes an agentic workspace assistant that can inspect the current audit workspace, retrieve relevant records/findings, summarize risk, draft clarification lists, prepare export links, and run existing audit modules through deterministic backend tools.
+
+Example prompts:
+
+Summarize this workspace
+Show high-risk findings
+Which vendors have the most findings?
+Draft client clarification list
+Run fixed asset audit
+Export PDF and CSV
+Extract records again
+
+Current Audit Chat scope:
+
+Retrieves relevant findings and records
+Summarizes workspace risk
+Groups findings by vendor/party
+Drafts client clarification lists
+Runs existing audit modules
+Runs record extraction
+Prepares export links
+
+It does not require a paid LLM API for the local demo.
+
+Tech Stack
+Frontend
+Next.js
+React
+TypeScript
+Tailwind CSS
+Lucide React
+Axios
+Backend
+FastAPI
+Python
+SQLAlchemy
+SQLite
+Pandas
+OpenPyXL
+CSV export
+PDF report generation
+Architecture
+AuditPal/
+├── frontend/          # Next.js frontend
+├── backend/           # FastAPI backend
+├── sample-data/       # Sample audit CSV/XLSX files
+├── screenshots/       # README screenshots
+├── docs/
+└── README.md
+Backend Capabilities
+Workspace creation and deletion
+File upload and deletion
+CSV/XLSX parsing
+Column detection
+Saved column mappings
+Record extraction
+Audit run creation
+Rule-based audit modules
+Findings persistence
+Review status updates
+Reviewer notes
+CSV/PDF report generation
+Audit Chat tool execution
+Getting Started
+1. Clone the repository
+git clone https://github.com/Jayvin21/AuditPal.git
+cd AuditPal
+2. Start the backend
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+Backend:
+
+http://localhost:8000
+
+API docs:
+
+http://localhost:8000/docs
+3. Start the frontend
+
+Open a second terminal:
+
+cd frontend
+npm install
+npm run dev
+
+Frontend:
+
+http://localhost:3000
+Demo Workflow
+1. Create workspace
+2. Upload CSV/XLSX file
+3. Choose file type
+4. Map columns
+5. Extract records
+6. Run relevant audit module
+7. Review findings
+8. Save reviewer status/notes
+9. Ask Audit Chat for summary or clarification list
+10. Export CSV/PDF report
+Example Audit Checks
+
+AuditPal can detect issues such as:
+
+Missing invoice number
+Missing vendor/customer name
+Missing GSTIN
+Invalid GSTIN format
+Duplicate invoice numbers
+Repeated same-party same-amount transactions
+High-value purchases/sales/expenses
+Round-number transactions
+Year-end transactions
+Possible TDS not deducted
+Missing PAN for TDS-sensitive payments
+Suspense ledger balances
+Abnormal trial balance signs
+Overdue receivables/payables
+Old outstanding balances
+Depreciation exceeding asset cost
+Negative WDV
+Fully depreciated active assets
+Books entries missing support documents
+Support documents not booked
+Books vs support amount mismatch
+GST books vs GSTR-2B mismatch
+Current Limitations
+Document Matching currently works with structured OCR/support document extracts, not direct raw image/PDF OCR.
+The audit engine is rule-based and deterministic; it is designed for exception detection, not final audit judgment.
+Results require human review.
+SQLite is used for local demo storage.
+Report exports are workspace-level in the current version.
+Future Improvements
+Gemini/OpenAI intent planner for Audit Chat
+Direct PDF/image OCR for invoice and voucher extraction
+Selected audit-run-specific PDF/CSV exports
+User authentication
+Organization/team roles
+Cloud database deployment
+Background jobs for large files
+Configurable materiality thresholds
+LLM-generated audit memos and client query letters
+Portfolio Positioning
+
+AuditPal demonstrates:
+
+Full-stack product development
+Audit-domain workflow design
+Data extraction and normalization
+Rule-based automation
+RAG-style workspace retrieval
+Agentic assistant patterns
+Human-in-the-loop review
+Report generation
+Realistic business process automation
+Author
+
+Jayvin Parmar
+
+Computer Engineering graduate building full-stack AI, automation, RAG, and data workflow systems.
+
+GitHub: Jayvin21
+
+"""
+
+README.write_text(readme, encoding="utf-8")
+
+print("README.md created successfully.")
+print(README)
