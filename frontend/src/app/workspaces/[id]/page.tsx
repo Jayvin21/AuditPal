@@ -74,15 +74,11 @@ type AuditRunResponse = {
     gstr_2b_records?: number;
     checked_records?: number;
     ledger_records_checked?: number;
-    fixed_asset_records_checked?: number;
-    aging_records_checked?: number;
-    trial_balance_records_checked?: number;
-    aging_records_checked?: number;
     tds_records_checked?: number;
     fixed_asset_records_checked?: number;
-    aging_records_checked?: number;
     trial_balance_records_checked?: number;
     aging_records_checked?: number;
+    document_match_records_checked?: number;
     unchecked_records: number;
     issues_found: number;
     risk_counts?: Record<string, number>;
@@ -121,6 +117,53 @@ const standardFields = [
   { key: "credit_amount", label: "Credit / Deposit / Receipt" },
   { key: "gstin", label: "GSTIN" },
   { key: "description", label: "Description / Narration" },
+];
+
+type SearchableOption = {
+  value: string;
+  label: string;
+  description?: string;
+  group?: string;
+};
+
+
+const fileTypeOptions: SearchableOption[] = [
+  { value: "purchase_register", label: "Purchase Register", group: "Core books", description: "Generic purchase register or vendor invoice listing." },
+  { value: "tally_purchase_register", label: "Tally Purchase Register", group: "Tally", description: "Purchase export from Tally Prime / ERP." },
+  { value: "generic_sales_register", label: "Sales Register", group: "Core books", description: "Sales invoice register or customer billing export." },
+  { value: "expense_ledger", label: "Expense Ledger", group: "Core books", description: "Expense ledger, overhead ledger, or payment expense file." },
+  { value: "tds_ledger", label: "TDS Ledger", group: "Tax", description: "TDS deduction/payment review file." },
+  { value: "tally_ledger_vouchers", label: "Tally Ledger Vouchers", group: "Tally", description: "Ledger voucher export from Tally." },
+  { value: "bank_statement", label: "Bank Statement", group: "Banking", description: "Bank statement downloaded from bank portal." },
+  { value: "cash_bank_ledger", label: "Cash / Bank Ledger", group: "Banking", description: "Books-side cash or bank ledger." },
+  { value: "bank_ledger", label: "Bank Ledger", group: "Banking", description: "Books-side bank ledger." },
+  { value: "tally_bank_book", label: "Tally Bank Book", group: "Tally", description: "Tally bank book export." },
+  { value: "sap_vendor_line_items", label: "SAP Vendor Line Items - FBL1N", group: "SAP", description: "SAP vendor open/cleared line item export." },
+  { value: "sap_gl_line_items", label: "SAP G/L Line Items - FBL3N", group: "SAP", description: "SAP general ledger line item export." },
+  { value: "sap_customer_line_items", label: "SAP Customer Line Items - FBL5N", group: "SAP", description: "SAP customer line item export." },
+  { value: "gstr_2b", label: "GSTR-2B", group: "GST", description: "GST portal GSTR-2B purchase/ITC file." },
+  { value: "fixed_asset_register", label: "Fixed Asset Register", group: "Fixed assets", description: "Asset register with cost, WDV, depreciation, and status." },
+  { value: "depreciation_schedule", label: "Depreciation Schedule", group: "Fixed assets", description: "Depreciation computation or schedule." },
+  { value: "sap_asset_register", label: "SAP Asset Register", group: "SAP", description: "SAP fixed asset register/export." },
+  { value: "tally_fixed_assets", label: "Tally Fixed Assets", group: "Tally", description: "Tally fixed asset ledger/export." },
+  { value: "tally_trial_balance", label: "Tally Trial Balance", group: "Trial balance", description: "Trial balance exported from Tally." },
+  { value: "sap_trial_balance", label: "SAP Trial Balance", group: "Trial balance", description: "Trial balance exported from SAP." },
+  { value: "financial_statement", label: "Financial Statement", group: "Trial balance", description: "Financial statement or schedule extract." },
+  { value: "trial_balance", label: "Trial Balance", group: "Trial balance", description: "Generic trial balance file." },
+  { value: "receivables_aging", label: "Receivables Aging", group: "Aging", description: "Debtors/customer aging report." },
+  { value: "payables_aging", label: "Payables Aging", group: "Aging", description: "Creditors/vendor aging report." },
+  { value: "outstanding_receivables", label: "Outstanding Receivables", group: "Aging", description: "Open receivable items." },
+  { value: "outstanding_payables", label: "Outstanding Payables", group: "Aging", description: "Open payable items." },
+  { value: "tally_outstanding_receivables", label: "Tally Outstanding Receivables", group: "Tally", description: "Tally customer outstanding export." },
+  { value: "tally_outstanding_payables", label: "Tally Outstanding Payables", group: "Tally", description: "Tally vendor outstanding export." },
+  { value: "sap_customer_open_items", label: "SAP Customer Open Items", group: "SAP", description: "SAP customer open item report." },
+  { value: "sap_vendor_open_items", label: "SAP Vendor Open Items", group: "SAP", description: "SAP vendor open item report." },
+  { value: "support_documents", label: "Support Documents / OCR Extract", group: "Support docs", description: "Structured OCR/support document extract." },
+  { value: "ocr_extract", label: "OCR Extract", group: "Support docs", description: "OCR-extracted document data." },
+  { value: "document_extract", label: "Document Extract", group: "Support docs", description: "Structured document extraction output." },
+  { value: "voucher_support", label: "Voucher Support", group: "Support docs", description: "Supporting voucher extract." },
+  { value: "invoice_ocr", label: "Invoice OCR", group: "Support docs", description: "OCR output from invoice images/PDFs." },
+  { value: "bill_ocr", label: "Bill OCR", group: "Support docs", description: "OCR output from bill images/PDFs." },
 ];
 
 const importTemplates = [
@@ -445,6 +488,25 @@ export default function WorkspaceDetailPage() {
 
 
 
+
+
+  async function runDocumentMatching() {
+    setBusy(true);
+    setStatusMessage("Running support document matching...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-document-matching`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("Document matching completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Document matching failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function runAgingReview() {
     setBusy(true);
@@ -820,6 +882,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runDocumentMatching={runDocumentMatching}
                 runAgingReview={runAgingReview}
                 runTrialBalanceReview={runTrialBalanceReview}
                 runFixedAssetAudit={runFixedAssetAudit}
@@ -927,6 +990,94 @@ function MobileSectionNav({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+
+function SearchableSelect({
+  value,
+  onChange,
+  options,
+  placeholder = "Search...",
+  emptyText = "No matches",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SearchableOption[];
+  placeholder?: string;
+  emptyText?: string;
+}) {
+  const selected = options.find((option) => option.value === value) ?? null;
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const filteredOptions = options.filter((option) => {
+    const haystack = `${option.label} ${option.value} ${option.description ?? ""} ${option.group ?? ""}`.toLowerCase();
+    return haystack.includes(query.toLowerCase().trim());
+  });
+
+  return (
+    <div className="relative">
+      <input
+        value={open ? query : selected?.label ?? ""}
+        onFocus={() => {
+          setOpen(true);
+          setQuery("");
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setOpen(false), 120);
+        }}
+        placeholder={placeholder}
+        className="w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
+      />
+
+      {selected && !open && (
+        <p className="mt-2 text-xs text-[#6B8E7F]">
+          Selected: <span className="font-medium text-[#42685B]">{selected.label}</span>
+          {selected.group ? ` · ${selected.group}` : ""}
+        </p>
+      )}
+
+      {open && (
+        <div className="absolute z-30 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-[#C8DDD0] bg-white p-2 shadow-lg">
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-[#6B8E7F]">{emptyText}</div>
+          ) : (
+            filteredOptions.map((option) => {
+              const active = option.value === value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    onChange(option.value);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  className={
+                    active
+                      ? "block w-full rounded-xl bg-[#358873] px-3 py-3 text-left text-sm text-white"
+                      : "block w-full rounded-xl px-3 py-3 text-left text-sm text-[#17352E] hover:bg-[#EDF6F0]"
+                  }
+                >
+                  <span className="block font-medium">{option.label}</span>
+                  <span className={active ? "mt-1 block text-xs text-white/80" : "mt-1 block text-xs text-[#6B8E7F]"}>
+                    {option.group ? `${option.group} · ` : ""}
+                    {option.description ?? option.value}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1081,100 +1232,107 @@ function FilesSection({
   openMapping: (fileId: number) => void;
   setActiveSection: (section: string) => void;
 }) {
+  const [fileSearch, setFileSearch] = useState("");
+
+  const selectedType = fileTypeOptions.find((option) => option.value === fileType);
+  const visibleFiles = files.filter((file) => {
+    const query = fileSearch.toLowerCase().trim();
+    if (!query) return true;
+
+    return `${file.original_filename} ${file.file_type} ${file.status}`.toLowerCase().includes(query);
+  });
+
   return (
     <SectionShell
       title="Files"
       subtitle="Upload source files and label them correctly before column mapping."
     >
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className="grid items-start gap-6 lg:grid-cols-[0.78fr_1.22fr]">
+        <div className="h-fit">
+          <Card>
+            <div className="mb-5 flex items-center gap-2">
+              <Upload size={18} className="text-[#358873]" />
+              <h2 className="font-medium">Upload audit file</h2>
+            </div>
+
+            <label className="mb-2 block text-sm text-[#5F7D70]">File type</label>
+            <SearchableSelect
+              value={fileType}
+              onChange={setFileType}
+              options={fileTypeOptions}
+              placeholder="Search file type, module, source..."
+            />
+
+            {selectedType?.description && (
+              <div className="my-4 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4 text-sm leading-6 text-[#5F7D70]">
+                <p className="font-medium text-[#17352E]">{selectedType.label}</p>
+                <p className="mt-1">{selectedType.description}</p>
+              </div>
+            )}
+
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleFileChange}
+              className="mb-4 mt-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm text-[#17352E]"
+            />
+
+            {selectedFile && (
+              <p className="mb-4 rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-3 text-sm text-[#5F7D70]">
+                Selected: {selectedFile.name}
+              </p>
+            )}
+
+            <button
+              onClick={uploadFile}
+              disabled={busy}
+              className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+            >
+              Upload File
+            </button>
+          </Card>
+        </div>
+
         <Card>
-          <div className="mb-5 flex items-center gap-2">
-            <Upload size={18} className="text-[#358873]" />
-            <h2 className="font-medium">Upload audit file</h2>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={18} className="text-[#358873]" />
+              <h2 className="font-medium">Uploaded files</h2>
+            </div>
+
+            <span className="rounded-full bg-[#EAF4EE] px-3 py-1 text-xs font-medium text-[#2F7866]">
+              {visibleFiles.length} / {files.length}
+            </span>
           </div>
 
-          <label className="mb-2 block text-sm text-[#5F7D70]">File type</label>
-          <select
-            value={fileType}
-            onChange={(event) => setFileType(event.target.value)}
-            className="mb-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 outline-none focus:border-[#4E9C81]"
-          >
-            <option value="purchase_register">Purchase Register</option>
-            <option value="tally_purchase_register">Tally Purchase Register</option>
-            <option value="generic_sales_register">Sales Register</option>
-            <option value="expense_ledger">Expense Ledger</option>
-            <option value="tds_ledger">TDS Ledger</option>
-            <option value="tally_ledger_vouchers">Tally Ledger Vouchers</option>
-            <option value="bank_statement">Bank Statement</option>
-            <option value="cash_bank_ledger">Cash / Bank Ledger</option>
-            <option value="bank_ledger">Bank Ledger</option>
-            <option value="tally_bank_book">Tally Bank Book</option>
-            <option value="sap_vendor_line_items">SAP Vendor Line Items - FBL1N</option>
-            <option value="sap_gl_line_items">SAP G/L Line Items - FBL3N</option>
-            <option value="sap_customer_line_items">SAP Customer Line Items - FBL5N</option>
-            <option value="gstr_2b">GSTR-2B</option>
-            <option value="fixed_asset_register">Fixed Asset Register</option>
-            <option value="depreciation_schedule">Depreciation Schedule</option>
-            <option value="sap_asset_register">SAP Asset Register</option>
-            <option value="tally_fixed_assets">Tally Fixed Assets</option>
-            <option value="tally_trial_balance">Tally Trial Balance</option>
-            <option value="sap_trial_balance">SAP Trial Balance</option>
-            <option value="financial_statement">Financial Statement</option>
-            <option value="receivables_aging">Receivables Aging</option>
-            <option value="payables_aging">Payables Aging</option>
-            <option value="outstanding_receivables">Outstanding Receivables</option>
-            <option value="outstanding_payables">Outstanding Payables</option>
-            <option value="tally_outstanding_receivables">Tally Outstanding Receivables</option>
-            <option value="tally_outstanding_payables">Tally Outstanding Payables</option>
-            <option value="sap_customer_open_items">SAP Customer Open Items</option>
-            <option value="sap_vendor_open_items">SAP Vendor Open Items</option>
-            <option value="trial_balance">Trial Balance</option>
-          </select>
-
-          <input
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={handleFileChange}
-            className="mb-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm text-[#17352E]"
-          />
-
-          {selectedFile && (
-            <p className="mb-4 rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-3 text-sm text-[#5F7D70]">
-              Selected: {selectedFile.name}
-            </p>
+          {files.length > 0 && (
+            <input
+              value={fileSearch}
+              onChange={(event) => setFileSearch(event.target.value)}
+              placeholder="Search uploaded files, type, status..."
+              className="mb-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
+            />
           )}
-
-          <button
-            onClick={uploadFile}
-            disabled={busy}
-            className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
-          >
-            Upload File
-          </button>
-        </Card>
-
-        <Card>
-          <div className="mb-5 flex items-center gap-2">
-            <FileSpreadsheet size={18} className="text-[#358873]" />
-            <h2 className="font-medium">Uploaded files</h2>
-          </div>
 
           {files.length === 0 ? (
             <EmptyState text="No files uploaded yet. Upload a purchase register, bank statement, or ledger file." />
+          ) : visibleFiles.length === 0 ? (
+            <EmptyState text="No uploaded files match the search." />
           ) : (
-            <div className="space-y-3">
-              {files.map((file) => (
+            <div className="max-h-[720px] space-y-3 overflow-auto pr-1">
+              {visibleFiles.map((file) => (
                 <div
                   key={file.id}
                   className="rounded-xl border border-[#D6E6DD] bg-[#F6FBF8] p-4"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-[#17352E]">{file.original_filename}</p>
+                    <div className="min-w-0">
+                      <p className="break-all font-medium text-[#17352E]">{file.original_filename}</p>
                       <p className="mt-1 text-sm text-[#5F7D70]">
-                        {file.file_type} · {file.status}
+                        {formatFileType(file.file_type)} · {file.status}
                       </p>
                     </div>
+
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => {
@@ -1328,6 +1486,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runDocumentMatching,
   runAgingReview,
   runTrialBalanceReview,
   runFixedAssetAudit,
@@ -1347,6 +1506,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runDocumentMatching: () => void;
   runAgingReview: () => void;
   runTrialBalanceReview: () => void;
   runFixedAssetAudit: () => void;
@@ -1358,6 +1518,9 @@ function AuditSection({
   const runHistory = auditRuns ?? [];
   const recommendedModule = inferRecommendedAuditModule(files);
   const [selectedModule, setSelectedModule] = useState(recommendedModule);
+  const [runSearch, setRunSearch] = useState("");
+  const [runTypeFilter, setRunTypeFilter] = useState("all");
+  const [showAllRuns, setShowAllRuns] = useState(false);
 
   useEffect(() => {
     setSelectedModule(recommendedModule);
@@ -1383,6 +1546,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "document_match",
+      label: "Document Matching",
+      description: "Matches books entries against OCR/support document extracts and flags missing support, mismatched amounts, party mismatches, and low confidence OCR.",
+      run: runDocumentMatching,
     },
     {
       key: "aging",
@@ -1428,7 +1597,36 @@ function AuditSection({
     },
   ];
 
+  const moduleSelectOptions: SearchableOption[] = moduleOptions.map((module) => ({
+    value: module.key,
+    label: module.label,
+    description: module.description,
+    group: "Audit module",
+  }));
+
   const selected = moduleOptions.find((module) => module.key === selectedModule) ?? moduleOptions[0];
+
+  const runTypeOptions: SearchableOption[] = [
+    { value: "all", label: "All audit types", group: "History filter" },
+    ...Array.from(new Set(runHistory.map((run) => run.audit_type))).sort().map((type) => ({
+      value: type,
+      label: formatAuditType(type),
+      group: "Audit type",
+      description: type,
+    })),
+  ];
+
+  const filteredRunHistory = runHistory.filter((run) => {
+    const query = runSearch.toLowerCase().trim();
+    const typeMatch = runTypeFilter === "all" || run.audit_type === runTypeFilter;
+    const searchMatch =
+      !query ||
+      `${formatAuditType(run.audit_type)} ${run.audit_type} ${run.id} ${run.status}`.toLowerCase().includes(query);
+
+    return typeMatch && searchMatch;
+  });
+
+  const visibleRunHistory = showAllRuns ? filteredRunHistory : filteredRunHistory.slice(0, 5);
 
   const coverageSource =
     auditSummary && auditSummary.audit_run_id === selectedAuditRunId
@@ -1452,6 +1650,7 @@ function AuditSection({
     coverageSource?.fixed_asset_records_checked ??
     coverageSource?.trial_balance_records_checked ??
     coverageSource?.aging_records_checked ??
+    coverageSource?.document_match_records_checked ??
     0;
 
   return (
@@ -1459,7 +1658,7 @@ function AuditSection({
       title="Audit Runs"
       subtitle="Run audit modules, revisit previous runs, and continue review where you left off."
     >
-      <div className="grid items-start gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+      <div className="grid items-start gap-6 lg:grid-cols-[0.8fr_1.2fr]">
         <div className="h-fit">
           <Card>
             <div className="mb-5 flex items-center gap-2">
@@ -1467,43 +1666,45 @@ function AuditSection({
               <h2 className="font-medium">Run audit module</h2>
             </div>
 
-          <label className="mb-2 block text-sm text-[#5F7D70]">
-            Audit module
-          </label>
+            <label className="mb-2 block text-sm text-[#5F7D70]">
+              Audit module
+            </label>
 
-          <select
-            value={selectedModule}
-            onChange={(event) => setSelectedModule(event.target.value)}
-            className="mb-4 w-full rounded-xl border border-[#C8DDD0] bg-[#F6FBF8] px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
-          >
-            {moduleOptions.map((module) => (
-              <option key={module.key} value={module.key}>
-                {module.label}
-              </option>
-            ))}
-          </select>
+            <SearchableSelect
+              value={selectedModule}
+              onChange={setSelectedModule}
+              options={moduleSelectOptions}
+              placeholder="Search audit module..."
+            />
 
-          <div className="mb-4 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4 text-sm leading-6 text-[#5F7D70]">
-            <p className="font-medium text-[#17352E]">{selected.label}</p>
-            <p className="mt-1">{selected.description}</p>
-          </div>
+            <div className="my-4 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-4 text-sm leading-6 text-[#5F7D70]">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <p className="font-medium text-[#17352E]">{selected.label}</p>
+                {selected.key === recommendedModule && (
+                  <span className="rounded-full bg-[#EAF4EE] px-2 py-1 text-[11px] font-medium text-[#2F7866]">
+                    Recommended
+                  </span>
+                )}
+              </div>
+              <p>{selected.description}</p>
+            </div>
 
-          <div className="space-y-3">
-            <button
-              onClick={parseFiles}
-              disabled={busy}
-              className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
-            >
-              Apply Mapping & Extract Records
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={parseFiles}
+                disabled={busy}
+                className="w-full rounded-xl border border-[#B4D6C1] bg-white px-5 py-3 font-medium text-[#17352E] transition hover:bg-[#EDF6F0] disabled:opacity-50"
+              >
+                Apply Mapping & Extract Records
+              </button>
 
-            <button
-              onClick={selected.run}
-              disabled={busy}
-              className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
-            >
-              Run {selected.label}
-            </button>
+              <button
+                onClick={selected.run}
+                disabled={busy}
+                className="w-full rounded-xl bg-[#358873] px-5 py-3 font-medium text-white transition hover:bg-[#2F7866] disabled:opacity-50"
+              >
+                Run {selected.label}
+              </button>
             </div>
           </Card>
         </div>
@@ -1528,25 +1729,59 @@ function AuditSection({
           </Card>
 
           <Card>
-            <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="font-medium">Audit run history</h2>
                 <p className="mt-1 text-sm text-[#5F7D70]">
-                  Select a run to view its findings and continue review.
+                  Search, filter, and select a run to continue review.
                 </p>
               </div>
+
+              <span className="rounded-full bg-[#EAF4EE] px-3 py-1 text-xs font-medium text-[#2F7866]">
+                {filteredRunHistory.length} / {runHistory.length}
+              </span>
             </div>
+
+            {runHistory.length > 0 && (
+              <div className="mb-4 grid gap-3 rounded-2xl border border-[#D6E6DD] bg-[#F6FBF8] p-3 md:grid-cols-[1fr_0.9fr_auto]">
+                <input
+                  value={runSearch}
+                  onChange={(event) => setRunSearch(event.target.value)}
+                  placeholder="Search run, type, status, ID..."
+                  className="rounded-xl border border-[#C8DDD0] bg-white px-4 py-3 text-sm outline-none focus:border-[#4E9C81]"
+                />
+
+                <SearchableSelect
+                  value={runTypeFilter}
+                  onChange={setRunTypeFilter}
+                  options={runTypeOptions}
+                  placeholder="Filter audit type..."
+                />
+
+                <button
+                  onClick={() => setShowAllRuns((current) => !current)}
+                  className="rounded-xl border border-[#B4D6C1] bg-white px-4 py-3 text-sm font-medium text-[#17352E] transition hover:bg-[#EDF6F0]"
+                >
+                  {showAllRuns ? "Show latest 5" : "Show all"}
+                </button>
+              </div>
+            )}
 
             {runHistory.length === 0 ? (
               <EmptyState text="No audit runs yet." />
+            ) : visibleRunHistory.length === 0 ? (
+              <EmptyState text="No audit runs match the current filters." />
             ) : (
-              <div className="space-y-3">
-                {runHistory.map((run) => {
+              <div className="max-h-[720px] space-y-3 overflow-auto pr-1">
+                {visibleRunHistory.map((run) => {
                   const active = run.id === selectedAuditRunId;
                   const statusCounts = run.status_counts ?? {};
                   const open = statusCounts.needs_review ?? 0;
                   const resolved = statusCounts.resolved ?? 0;
                   const confirmed = statusCounts.confirmed_issue ?? 0;
+                  const progress = run.issues_found > 0
+                    ? Math.round(((confirmed + resolved) / run.issues_found) * 100)
+                    : 100;
 
                   return (
                     <div
@@ -1557,16 +1792,23 @@ function AuditSection({
                           : "rounded-2xl border border-[#D6E6DD] bg-[#F8FCF9] p-4"
                       }
                     >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
                         <button
                           onClick={() => setSelectedAuditRunId(run.id)}
-                          className="text-left"
+                          className="min-w-0 text-left"
                         >
-                          <p className="font-medium text-[#17352E]">
-                            {formatAuditType(run.audit_type)} #{run.id}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium text-[#17352E]">
+                              {formatAuditType(run.audit_type)} #{run.id}
+                            </p>
+                            {active && (
+                              <span className="rounded-full bg-[#358873] px-2 py-1 text-[11px] font-medium text-white">
+                                Selected
+                              </span>
+                            )}
+                          </div>
                           <p className="mt-1 text-xs text-[#5F7D70]">
-                            {formatDateTime(run.created_at)} · {run.status}
+                            {formatDateTime(run.created_at)} · {run.status} · {progress}% reviewed
                           </p>
                         </button>
 
@@ -1713,18 +1955,19 @@ function FindingsSection({
 
           <div>
             <label className="mb-2 block text-sm text-[#5F7D70]">Issue type</label>
-            <select
+            <SearchableSelect
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="w-full rounded-xl border border-[#C8DDD0] bg-white px-3 py-2 text-sm outline-none focus:border-[#4E9C81]"
-            >
-              <option value="all">All issue types</option>
-              {findingTypes.map((findingType) => (
-                <option key={findingType} value={findingType}>
-                  {findingType}
-                </option>
-              ))}
-            </select>
+              onChange={setTypeFilter}
+              options={[
+                { value: "all", label: "All issue types" },
+                ...findingTypes.map((findingType) => ({
+                  value: findingType,
+                  label: formatIssueType(findingType),
+                  description: findingType,
+                })),
+              ]}
+              placeholder="Search issue type..."
+            />
           </div>
 
           <div>
@@ -2062,16 +2305,31 @@ function MiniCount({ label, value }: { label: string; value: number }) {
   );
 }
 
+
+function formatFileType(type: string) {
+  return fileTypeOptions.find((option) => option.value === type)?.label ?? formatIssueType(type);
+}
+
+function formatIssueType(type: string) {
+  return type
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "document_matching") return "Document Matching";
   if (type === "aging_review") return "Receivables/Payables Aging";
   if (type === "trial_balance_review") return "Trial Balance Review";
   if (type === "fixed_asset_audit") return "Fixed Asset Audit";
   if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "gst_reconciliation") return "GST Reconciliation";
+  if (type === "document_matching") return "Document Matching";
   if (type === "aging_review") return "Receivables/Payables Aging";
   if (type === "trial_balance_review") return "Trial Balance Review";
   if (type === "fixed_asset_audit") return "Fixed Asset Audit";
@@ -2210,6 +2468,7 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("ocr") || type.includes("support") || type.includes("document_extract") || type.includes("voucher_support")) return "document_match";
   if (type.includes("aging") || type.includes("receivable") || type.includes("payable") || type.includes("outstanding") || type.includes("open_items")) return "aging";
   if (type.includes("trial_balance") || type.includes("financial_statement") || type.includes("fs_trial")) return "trial_balance";
   if (type.includes("fixed_asset") || type.includes("asset_register") || type.includes("depreciation") || type.includes("sap_asset") || type.includes("tally_fixed")) return "fixed_asset";

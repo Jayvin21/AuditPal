@@ -1,0 +1,10 @@
+Document No,Document Date,Vendor Name,Amount,OCR Confidence,OCR Text
+DOC-001,01-04-2025,ABC Suppliers,11800,0.96,Clear invoice
+DOC-003,03-04-2025,Amount Mismatch Vendor,48000,0.94,Amount mismatch invoice
+DOC-004,04-04-2025,Different Vendor Name,30000,0.93,Party name mismatch invoice
+DOC-005,05-04-2025,Duplicate Support Vendor,12000,0.91,Duplicate support copy one
+DOC-005,05-04-2025,Duplicate Support Vendor,12000,0.88,Duplicate support copy two
+DOC-006,06-04-2025,Low Confidence Vendor,9000,0.52,Low confidence OCR
+DOC-007,07-04-2025,Support Only Vendor,15000,0.95,Support not booked
+,08-04-2025,No Document Number Vendor,10000,0.9,Missing document number
+DOC-009,09-04-2025,Missing Amount Vendor,,0.9,Missing amount

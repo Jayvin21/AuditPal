@@ -17,6 +17,7 @@ from app.services.audit_engine.checks.tds_checks import run_tds_checks
 from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks
 from app.services.audit_engine.checks.trial_balance_checks import run_trial_balance_checks
 from app.services.audit_engine.checks.aging_checks import run_aging_checks
+from app.services.audit_engine.checks.document_match_checks import run_document_match_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -457,6 +458,92 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "expense_records_checked": len(expense_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_document_matching(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    book_records = [
+        record for record in records
+        if record.record_type.lower() in DOCUMENT_MATCH_BOOK_FILE_TYPES
+    ]
+
+    support_records = [
+        record for record in records
+        if record.record_type.lower() in DOCUMENT_SUPPORT_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not book_records or not support_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="document_matching",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "Document matching needs at least one books file and one support/OCR extract file.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "book_records": len(book_records),
+                "support_records": len(support_records),
+                "document_match_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_document_match_checks(book_records, support_records)
+    checked_records = len(book_records) + len(support_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="document_matching",
+        status="completed",
+        total_records=checked_records,
+        checked_records=checked_records,
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - checked_records),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Document matching completed using books and support/OCR extract records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "book_records": len(book_records),
+            "support_records": len(support_records),
+            "document_match_records_checked": checked_records,
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
@@ -1046,4 +1133,23 @@ AGING_FILE_TYPES = {
     "tally_outstanding_payables",
     "sap_customer_open_items",
     "sap_vendor_open_items",
+}
+
+
+DOCUMENT_MATCH_BOOK_FILE_TYPES = {
+    "purchase_register",
+    "tally_purchase_register",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_vendor_line_items",
+    "fixed_asset_register",
+}
+
+DOCUMENT_SUPPORT_FILE_TYPES = {
+    "support_documents",
+    "ocr_extract",
+    "document_extract",
+    "voucher_support",
+    "invoice_ocr",
+    "bill_ocr",
 }

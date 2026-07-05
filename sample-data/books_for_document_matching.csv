@@ -1,0 +1,7 @@
+Invoice No,Invoice Date,Vendor Name,Amount,Narration
+DOC-001,01-04-2025,ABC Suppliers,11800,Matched support document
+DOC-002,02-04-2025,Missing Support Vendor,25000,Books entry missing support
+DOC-003,03-04-2025,Amount Mismatch Vendor,50000,Amount mismatch with support
+DOC-004,04-04-2025,Party Mismatch Vendor,30000,Party mismatch with support
+DOC-005,05-04-2025,Duplicate Support Vendor,12000,Duplicate support document
+DOC-006,06-04-2025,Low Confidence Vendor,9000,Low confidence OCR

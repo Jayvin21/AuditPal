@@ -13,6 +13,7 @@ from app.services.audit_engine.runner import (
     run_fixed_asset_audit,
     run_trial_balance_review,
     run_aging_review,
+    run_document_matching,
     run_purchase_audit,
     run_sales_audit,
 )
@@ -42,6 +43,14 @@ def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_expense_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-document-matching")
+def run_real_document_matching(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_document_matching(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Document matching failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-aging-review")
