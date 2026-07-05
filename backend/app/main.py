@@ -12,7 +12,7 @@ from app.api.routes import (
     findings,
     records,
     column_mappings,
-    reports,
+    reports, import_templates,
 )
 
 
@@ -41,3 +41,4 @@ app.include_router(findings.router)
 app.include_router(records.router)
 app.include_router(column_mappings.router)
 app.include_router(reports.router)
+app.include_router(import_templates.router)

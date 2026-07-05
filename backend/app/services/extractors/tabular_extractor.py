@@ -11,12 +11,30 @@ COLUMN_ALIASES = {
         "bill number", "voucher no", "voucher number", "document no",
         "document number", "ref no", "reference no", "reference number",
         "cheque no", "chq no", "transaction id", "utr", "utr no"
-    ],
+    
+        "voucher no.",
+        "vch no",
+        "vch no.",
+        "doc number",
+        "assignment",
+        "invoice reference",
+        "supplier invoice no",
+        "bill no.",
+        "instrument no",
+        "billing document",],
     "party_name": [
         "vendor", "vendor name", "supplier", "supplier name", "party",
         "party name", "customer", "customer name", "name", "ledger name",
         "beneficiary", "payee", "payer", "account name"
-    ],
+    
+        "particulars",
+        "name 1",
+        "g/l account",
+        "gl account",
+        "cost center",
+        "profit center",
+        "trade/legal name",
+        "legal name",],
     "transaction_date": [
         "date", "invoice date", "bill date", "voucher date", "posting date",
         "document date", "transaction date", "entry date", "value date"
@@ -25,23 +43,39 @@ COLUMN_ALIASES = {
         "amount", "total", "total amount", "gross amount", "invoice amount",
         "bill amount", "net amount", "taxable value", "value", "grand total",
         "transaction amount"
-    ],
+    
+        "gross total",
+        "invoice value",
+        "amount in local currency",
+        "local currency amount",
+        "inr amount",
+        "debit/credit amount",],
     "debit_amount": [
         "debit", "debit amount", "withdrawal", "withdrawals", "dr", "paid",
         "payment", "payments", "amount debited"
-    ],
+    
+        "paid amount",],
     "credit_amount": [
         "credit", "credit amount", "deposit", "deposits", "cr", "received",
         "receipt", "receipts", "amount credited"
-    ],
+    
+        "received amount",],
     "gstin": [
         "gstin", "gst no", "gst number", "gstin/uin", "gstin uin",
         "supplier gstin", "vendor gstin", "gst"
-    ],
+    
+        "party gstin",
+        "gstin of supplier",],
     "description": [
         "description", "particulars", "narration", "details", "remarks",
         "item", "expense head", "transaction remarks"
-    ],
+    
+        "text",
+        "document header text",
+        "voucher type",
+        "supply type",
+        "place of supply",
+        "memo",],
 }
 
 
