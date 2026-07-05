@@ -14,6 +14,7 @@ from app.services.audit_engine.checks.sales_checks import run_sales_checks
 from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks
 from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks
 from app.services.audit_engine.checks.tds_checks import run_tds_checks
+from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -461,6 +462,82 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
     }
 
 
+def run_fixed_asset_audit(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    fixed_asset_records = [
+        record for record in records
+        if record.record_type.lower() in FIXED_ASSET_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not fixed_asset_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="fixed_asset_audit",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "Fixed asset audit needs a fixed asset register or depreciation schedule file.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "fixed_asset_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_fixed_asset_checks(fixed_asset_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="fixed_asset_audit",
+        status="completed",
+        total_records=len(fixed_asset_records),
+        checked_records=len(fixed_asset_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(fixed_asset_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Fixed asset audit completed using uploaded asset records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "fixed_asset_records_checked": len(fixed_asset_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
 def run_tds_review(workspace_id: int, db: Session) -> dict:
     parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
 
@@ -784,3 +861,12 @@ def run_bank_reconciliation(workspace_id: int, db: Session) -> dict:
             "risk_counts": risk_counts(finding_payloads),
         },
     }
+
+FIXED_ASSET_FILE_TYPES = {
+    "fixed_asset_register",
+    "fixed_assets",
+    "asset_register",
+    "depreciation_schedule",
+    "sap_asset_register",
+    "tally_fixed_assets",
+}

@@ -1,0 +1,16 @@
+Asset ID,Capitalization Date,Asset Category,Asset Description,Cost,Depreciation,Depreciation Rate,WDV,Status,Invoice No
+FA-001,01-04-2025,Computer,Laptop for office,75000,30000,40,45000,Active,INV-FA-001
+FA-002,31-03-2026,Plant and Machinery,Year end machine addition,250000,0,15,250000,Active,INV-FA-002
+FA-003,15-04-2025,Land,Freehold land purchase,500000,10000,2,490000,Active,INV-FA-003
+FA-004,20-04-2025,Vehicle,Company car,900000,120000,13.3,780000,Active,INV-FA-004
+FA-005,25-04-2025,Repairs,Major repair capitalized as asset,60000,6000,10,54000,Active,INV-FA-005
+FA-006,30-04-2025,Furniture,Office chairs,50000,,10,50000,Active,INV-FA-006
+FA-007,05-05-2025,Computer,Old server,100000,100000,40,0,Active,INV-FA-007
+FA-008,10-05-2025,Equipment,Scrapped equipment,80000,40000,15,40000,Scrapped,INV-FA-008
+,12-05-2025,Computer,Missing asset id,45000,18000,40,27000,Active,INV-FA-009
+FA-010,,Furniture,Missing capitalization date,30000,3000,10,27000,Active,INV-FA-010
+FA-011,18-05-2025,,Missing asset category,35000,3500,10,31500,Active,INV-FA-011
+FA-012,20-05-2025,Computer,Dep exceeds cost,50000,60000,120,-10000,Active,INV-FA-012
+FA-012,20-05-2025,Computer,Duplicate asset id,50000,20000,40,30000,Active,INV-FA-013
+FA-014,22-05-2025,Computer,Split invoice component,25000,10000,40,15000,Active,INV-SPLIT
+FA-015,22-05-2025,Computer,Split invoice component duplicate,25000,10000,40,15000,Active,INV-SPLIT

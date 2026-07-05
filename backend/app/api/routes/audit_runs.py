@@ -10,6 +10,7 @@ from app.services.audit_engine.runner import (
     run_gst_reconciliation,
     run_ledger_scrutiny,
     run_tds_review,
+    run_fixed_asset_audit,
     run_purchase_audit,
     run_sales_audit,
 )
@@ -39,6 +40,14 @@ def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_expense_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-fixed-asset-audit")
+def run_real_fixed_asset_audit(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_fixed_asset_audit(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Fixed asset audit failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-tds-review")

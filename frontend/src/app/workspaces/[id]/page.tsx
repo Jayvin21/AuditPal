@@ -74,7 +74,9 @@ type AuditRunResponse = {
     gstr_2b_records?: number;
     checked_records?: number;
     ledger_records_checked?: number;
+    fixed_asset_records_checked?: number;
     tds_records_checked?: number;
+    fixed_asset_records_checked?: number;
     unchecked_records: number;
     issues_found: number;
     risk_counts?: Record<string, number>;
@@ -435,6 +437,25 @@ export default function WorkspaceDetailPage() {
 
 
 
+
+  async function runFixedAssetAudit() {
+    setBusy(true);
+    setStatusMessage("Running fixed asset audit...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-fixed-asset-audit`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("Fixed asset audit completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Fixed asset audit failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runTdsReview() {
     setBusy(true);
     setStatusMessage("Running TDS review...");
@@ -755,6 +776,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runFixedAssetAudit={runFixedAssetAudit}
                 runTdsReview={runTdsReview}
                 runLedgerScrutiny={runLedgerScrutiny}
                 runGstReconciliation={runGstReconciliation}
@@ -1045,6 +1067,10 @@ function FilesSection({
             <option value="sap_gl_line_items">SAP G/L Line Items - FBL3N</option>
             <option value="sap_customer_line_items">SAP Customer Line Items - FBL5N</option>
             <option value="gstr_2b">GSTR-2B</option>
+            <option value="fixed_asset_register">Fixed Asset Register</option>
+            <option value="depreciation_schedule">Depreciation Schedule</option>
+            <option value="sap_asset_register">SAP Asset Register</option>
+            <option value="tally_fixed_assets">Tally Fixed Assets</option>
             <option value="trial_balance">Trial Balance</option>
           </select>
 
@@ -1245,6 +1271,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runFixedAssetAudit,
   runTdsReview,
   runLedgerScrutiny,
   runGstReconciliation,
@@ -1261,6 +1288,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runFixedAssetAudit: () => void;
   runTdsReview: () => void;
   runLedgerScrutiny: () => void;
   runGstReconciliation: () => void;
@@ -1294,6 +1322,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "fixed_asset",
+      label: "Fixed Asset Audit",
+      description: "Reviews fixed asset registers for missing asset IDs, capitalization risk, depreciation issues, disposals, and duplicate asset references.",
+      run: runFixedAssetAudit,
     },
     {
       key: "tds",
@@ -1342,6 +1376,7 @@ function AuditSection({
     coverageSource?.expense_records_checked ??
     coverageSource?.ledger_records_checked ??
     coverageSource?.tds_records_checked ??
+    coverageSource?.fixed_asset_records_checked ??
     0;
 
   return (
@@ -1956,9 +1991,11 @@ function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "fixed_asset_audit") return "Fixed Asset Audit";
   if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "gst_reconciliation") return "GST Reconciliation";
+  if (type === "fixed_asset_audit") return "Fixed Asset Audit";
   if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "bank_reconciliation") return "Bank Reconciliation";
@@ -2094,6 +2131,7 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("fixed_asset") || type.includes("asset_register") || type.includes("depreciation") || type.includes("sap_asset") || type.includes("tally_fixed")) return "fixed_asset";
   if (type.includes("tds")) return "tds";
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
