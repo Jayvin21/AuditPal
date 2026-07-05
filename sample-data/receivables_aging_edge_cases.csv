@@ -1,0 +1,10 @@
+Invoice No,Invoice Date,Due Date,Customer Name,Outstanding Amount,Days Overdue,Narration
+AR-001,01-04-2025,30-04-2025,Good Customer,25000,20,Normal receivable
+AR-002,01-01-2025,31-01-2025,Old Customer,150000,120,Old receivable over 90 days
+AR-003,01-09-2024,30-09-2024,Very Old Customer,650000,240,Very old high-value receivable
+AR-004,10-03-2025,,No Due Date Customer,50000,,Missing due date
+,15-03-2025,15-04-2025,No Invoice Customer,30000,80,Missing invoice reference
+AR-006,20-03-2025,20-04-2025,,40000,70,Missing party
+AR-007,01-04-2025,30-04-2025,Credit Balance Customer,-12000,30,Negative outstanding
+AR-008,01-04-2025,30-04-2025,Zero Balance Customer,0,10,Zero outstanding
+AR-009,01-02-2025,28-02-2025,Round Balance Customer,100000,100,Round old balance

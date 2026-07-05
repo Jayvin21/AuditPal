@@ -1,0 +1,9 @@
+Bill No,Bill Date,Due Date,Vendor Name,Outstanding Amount,Days Overdue,Narration
+AP-001,01-04-2025,30-04-2025,Normal Vendor,40000,20,Normal payable
+AP-002,01-10-2024,31-10-2024,Old Vendor,250000,210,Old payable over 180 days
+AP-003,01-01-2025,31-01-2025,High Value Vendor,700000,120,High-value payable
+AP-004,10-03-2025,,No Due Date Vendor,50000,,Missing due date
+,15-03-2025,15-04-2025,No Bill Vendor,30000,80,Missing reference
+AP-006,20-03-2025,20-04-2025,,40000,70,Missing vendor
+AP-007,01-04-2025,30-04-2025,Debit Balance Vendor,-15000,30,Negative payable
+AP-008,01-04-2025,30-04-2025,Round Vendor,100000,95,Round payable

@@ -75,10 +75,14 @@ type AuditRunResponse = {
     checked_records?: number;
     ledger_records_checked?: number;
     fixed_asset_records_checked?: number;
+    aging_records_checked?: number;
     trial_balance_records_checked?: number;
+    aging_records_checked?: number;
     tds_records_checked?: number;
     fixed_asset_records_checked?: number;
+    aging_records_checked?: number;
     trial_balance_records_checked?: number;
+    aging_records_checked?: number;
     unchecked_records: number;
     issues_found: number;
     risk_counts?: Record<string, number>;
@@ -441,6 +445,25 @@ export default function WorkspaceDetailPage() {
 
 
 
+
+  async function runAgingReview() {
+    setBusy(true);
+    setStatusMessage("Running receivables/payables aging review...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-aging-review`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("Aging review completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("Aging review failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runTrialBalanceReview() {
     setBusy(true);
     setStatusMessage("Running trial balance review...");
@@ -797,6 +820,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runAgingReview={runAgingReview}
                 runTrialBalanceReview={runTrialBalanceReview}
                 runFixedAssetAudit={runFixedAssetAudit}
                 runTdsReview={runTdsReview}
@@ -1096,6 +1120,14 @@ function FilesSection({
             <option value="tally_trial_balance">Tally Trial Balance</option>
             <option value="sap_trial_balance">SAP Trial Balance</option>
             <option value="financial_statement">Financial Statement</option>
+            <option value="receivables_aging">Receivables Aging</option>
+            <option value="payables_aging">Payables Aging</option>
+            <option value="outstanding_receivables">Outstanding Receivables</option>
+            <option value="outstanding_payables">Outstanding Payables</option>
+            <option value="tally_outstanding_receivables">Tally Outstanding Receivables</option>
+            <option value="tally_outstanding_payables">Tally Outstanding Payables</option>
+            <option value="sap_customer_open_items">SAP Customer Open Items</option>
+            <option value="sap_vendor_open_items">SAP Vendor Open Items</option>
             <option value="trial_balance">Trial Balance</option>
           </select>
 
@@ -1296,6 +1328,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runAgingReview,
   runTrialBalanceReview,
   runFixedAssetAudit,
   runTdsReview,
@@ -1314,6 +1347,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runAgingReview: () => void;
   runTrialBalanceReview: () => void;
   runFixedAssetAudit: () => void;
   runTdsReview: () => void;
@@ -1349,6 +1383,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "aging",
+      label: "Receivables/Payables Aging",
+      description: "Reviews debtor/creditor aging and open-item reports for overdue balances, missing due dates, old receivables, and payable confirmation risks.",
+      run: runAgingReview,
     },
     {
       key: "trial_balance",
@@ -1411,6 +1451,7 @@ function AuditSection({
     coverageSource?.tds_records_checked ??
     coverageSource?.fixed_asset_records_checked ??
     coverageSource?.trial_balance_records_checked ??
+    coverageSource?.aging_records_checked ??
     0;
 
   return (
@@ -2025,11 +2066,13 @@ function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "aging_review") return "Receivables/Payables Aging";
   if (type === "trial_balance_review") return "Trial Balance Review";
   if (type === "fixed_asset_audit") return "Fixed Asset Audit";
   if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "gst_reconciliation") return "GST Reconciliation";
+  if (type === "aging_review") return "Receivables/Payables Aging";
   if (type === "trial_balance_review") return "Trial Balance Review";
   if (type === "fixed_asset_audit") return "Fixed Asset Audit";
   if (type === "tds_review") return "TDS Review";
@@ -2167,6 +2210,7 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("aging") || type.includes("receivable") || type.includes("payable") || type.includes("outstanding") || type.includes("open_items")) return "aging";
   if (type.includes("trial_balance") || type.includes("financial_statement") || type.includes("fs_trial")) return "trial_balance";
   if (type.includes("fixed_asset") || type.includes("asset_register") || type.includes("depreciation") || type.includes("sap_asset") || type.includes("tally_fixed")) return "fixed_asset";
   if (type.includes("tds")) return "tds";

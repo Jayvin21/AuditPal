@@ -12,6 +12,7 @@ from app.services.audit_engine.runner import (
     run_tds_review,
     run_fixed_asset_audit,
     run_trial_balance_review,
+    run_aging_review,
     run_purchase_audit,
     run_sales_audit,
 )
@@ -41,6 +42,14 @@ def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_expense_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-aging-review")
+def run_real_aging_review(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_aging_review(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Aging review failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-trial-balance-review")

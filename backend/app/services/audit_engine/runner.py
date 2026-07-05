@@ -16,6 +16,7 @@ from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_s
 from app.services.audit_engine.checks.tds_checks import run_tds_checks
 from app.services.audit_engine.checks.fixed_asset_checks import run_fixed_asset_checks
 from app.services.audit_engine.checks.trial_balance_checks import run_trial_balance_checks
+from app.services.audit_engine.checks.aging_checks import run_aging_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -456,6 +457,82 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "expense_records_checked": len(expense_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_aging_review(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    aging_records = [
+        record for record in records
+        if record.record_type.lower() in AGING_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not aging_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="aging_review",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "Aging review needs receivables/payables aging or open-item files.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "aging_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_aging_checks(aging_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="aging_review",
+        status="completed",
+        total_records=len(aging_records),
+        checked_records=len(aging_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(aging_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "Aging review completed using uploaded receivable/payable records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "aging_records_checked": len(aging_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
@@ -955,4 +1032,18 @@ TRIAL_BALANCE_FILE_TYPES = {
     "sap_trial_balance",
     "financial_statement",
     "fs_trial_balance",
+}
+
+
+AGING_FILE_TYPES = {
+    "receivables_aging",
+    "payables_aging",
+    "outstanding_receivables",
+    "outstanding_payables",
+    "debtors_aging",
+    "creditors_aging",
+    "tally_outstanding_receivables",
+    "tally_outstanding_payables",
+    "sap_customer_open_items",
+    "sap_vendor_open_items",
 }
