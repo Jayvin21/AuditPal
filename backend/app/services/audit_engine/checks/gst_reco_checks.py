@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from difflib import SequenceMatcher
 
 
 def _norm(value):
@@ -9,23 +10,33 @@ def _norm(value):
     return str(value).strip()
 
 
-def _clean_id(value):
-    return _norm(value).replace(" ", "").replace("-", "").replace("/", "").lower()
+def _lower(value):
+    return _norm(value).lower()
 
 
-def _clean_gstin(value):
-    return _norm(value).upper().replace(" ", "")
+def _clean_doc(value):
+    return (
+        _norm(value)
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("/", "")
+        .replace("\\", "")
+        .lower()
+    )
 
 
 def _amount(value):
     if value is None:
         return None
+
     try:
         if isinstance(value, Decimal):
             return float(value)
+
         cleaned = str(value).replace(",", "").replace("₹", "").strip()
         if cleaned == "":
             return None
+
         return float(cleaned)
     except (ValueError, InvalidOperation):
         return None
@@ -34,42 +45,147 @@ def _amount(value):
 def _date_string(value):
     if not value:
         return ""
+
     if isinstance(value, (date, datetime)):
         return value.strftime("%Y-%m-%d")
+
     return str(value)
 
 
-def _key(record):
-    doc = _clean_id(getattr(record, "document_id", None))
-    gstin = _clean_gstin(getattr(record, "gstin", None))
-    return (doc, gstin)
+def _raw(record, *keys):
+    raw = getattr(record, "raw_data", None) or {}
+    source_values = raw.get("source_row_values", {}) if isinstance(raw, dict) else {}
+
+    lowered = {}
+
+    for data in [raw, source_values]:
+        if isinstance(data, dict):
+            lowered.update({str(k).strip().lower(): v for k, v in data.items()})
+
+    for key in keys:
+        if isinstance(raw, dict) and key in raw and raw[key] not in [None, ""]:
+            return raw[key]
+
+        if isinstance(source_values, dict) and key in source_values and source_values[key] not in [None, ""]:
+            return source_values[key]
+
+        lowered_key = key.strip().lower()
+        if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
+            return lowered[lowered_key]
+
+    return None
 
 
-def _display(record):
-    return {
-        "record_id": getattr(record, "id", None),
-        "source_row": getattr(record, "source_row", None),
-        "document_id": getattr(record, "document_id", None),
-        "party_name": getattr(record, "party_name", None),
-        "transaction_date": _date_string(getattr(record, "transaction_date", None)),
-        "amount": getattr(record, "amount", None),
-        "gstin": getattr(record, "gstin", None),
-        "record_type": getattr(record, "record_type", None),
-    }
+def _party(record):
+    return (
+        getattr(record, "party_name", None)
+        or _raw(record, "party_name", "Trade/Legal name", "Legal Name", "Vendor Name", "Supplier Name", "Party Name")
+        or ""
+    )
+
+
+def _gstin(record):
+    return (
+        getattr(record, "gstin", None)
+        or _raw(record, "supplier_gstin", "gstin", "GSTIN of supplier", "Supplier GSTIN", "Vendor GSTIN", "Party GSTIN", "GSTIN/UIN")
+        or ""
+    )
+
+
+def _taxable_value(record):
+    return _amount(
+        _raw(
+            record,
+            "taxable_value",
+            "Taxable Value",
+            "Taxable Amount",
+            "Assessable Value",
+            "Tax Base",
+        )
+    )
+
+
+def _invoice_value(record):
+    return _amount(
+        _raw(
+            record,
+            "invoice_value",
+            "Invoice Value",
+            "Gross Total",
+            "Gross Amount",
+            "Invoice Amount",
+            "Bill Amount",
+            "Total Invoice Value",
+        )
+    )
+
+
+def _tax_amount(record):
+    igst = _amount(_raw(record, "igst", "IGST", "IGST Amount", "Integrated Tax"))
+    cgst = _amount(_raw(record, "cgst", "CGST", "CGST Amount", "Central Tax"))
+    sgst = _amount(_raw(record, "sgst", "SGST", "SGST Amount", "State Tax"))
+
+    total = 0
+    found = False
+
+    for value in [igst, cgst, sgst]:
+        if value is not None:
+            total += value
+            found = True
+
+    return total if found else None
+
+
+def _amount_for_match(record):
+    taxable = _taxable_value(record)
+    if taxable is not None:
+        return taxable
+
+    invoice = _invoice_value(record)
+    if invoice is not None:
+        return invoice
+
+    return _amount(getattr(record, "amount", None))
+
+
+def _description(record):
+    return (
+        _raw(record, "description", "supply_type", "Supply Type", "Description", "Narration", "Particulars")
+        or getattr(record, "description", None)
+        or ""
+    )
+
+
+def _similarity(a, b):
+    a = _lower(a)
+    b = _lower(b)
+
+    if not a or not b:
+        return 0.0
+
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _money(value):
+    amount = _amount(value)
+    if amount is None:
+        return ""
+    return f"₹{amount:,.0f}"
 
 
 def _title(base, record):
     bits = []
+
     doc = _norm(getattr(record, "document_id", None))
-    party = _norm(getattr(record, "party_name", None))
-    gstin = _norm(getattr(record, "gstin", None))
+    party = _norm(_party(record))
+    amount = _money(_amount_for_match(record))
 
     if doc:
         bits.append(doc)
     if party:
         bits.append(party)
-    if gstin:
-        bits.append(gstin)
+    if amount:
+        bits.append(amount)
 
     if not bits:
         return base
@@ -77,13 +193,35 @@ def _title(base, record):
     return f"{base} — {' · '.join(bits[:3])}"
 
 
-def _finding(record, finding_type, risk_level, title, description, extra=None):
-    evidence = _display(record)
+def _record_display(record):
+    return {
+        "record_id": getattr(record, "id", None),
+        "source_row": getattr(record, "source_row", None),
+        "document_id": getattr(record, "document_id", None),
+        "party_name": _party(record),
+        "gstin": _gstin(record),
+        "transaction_date": _date_string(getattr(record, "transaction_date", None)),
+        "amount": getattr(record, "amount", None),
+        "taxable_value": _taxable_value(record),
+        "invoice_value": _invoice_value(record),
+        "tax_amount": _tax_amount(record),
+        "description": _description(record),
+        "record_type": getattr(record, "record_type", None),
+    }
+
+
+def _finding(record, finding_type, risk_level, title, description, matched_record=None, extra=None):
+    evidence = _record_display(record)
+
+    if matched_record is not None:
+        evidence["matched_record"] = _record_display(matched_record)
+
     if extra:
         evidence.update(extra)
 
     return {
         "source_record_id": getattr(record, "id", None),
+        "matched_record_id": getattr(matched_record, "id", None) if matched_record is not None else None,
         "finding_type": finding_type,
         "risk_level": risk_level,
         "title": _title(title, record),
@@ -92,48 +230,35 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
     }
 
 
-def _group_finding(records, finding_type, risk_level, title, description, extra=None):
-    first = records[0]
-    evidence = {
-        "duplicate_count": len(records),
-        "records": [_display(record) for record in records],
-        "document_id": getattr(first, "document_id", None),
-        "party_name": getattr(first, "party_name", None),
-        "gstin": getattr(first, "gstin", None),
-        "source_rows": [getattr(record, "source_row", None) for record in records],
-    }
+def _index_by_document(records):
+    index = defaultdict(list)
 
-    if extra:
-        evidence.update(extra)
+    for record in records:
+        doc = _clean_doc(getattr(record, "document_id", None))
+        if doc:
+            index[doc].append(record)
 
-    return {
-        "source_record_id": getattr(first, "id", None),
-        "finding_type": finding_type,
-        "risk_level": risk_level,
-        "title": _title(title, first),
-        "description": description,
-        "evidence": evidence,
-    }
+    return index
 
 
-def run_gst_reconciliation_checks(book_records, gstr_2b_records, amount_tolerance=5.0):
+def run_gst_reconciliation_checks(book_records, gstr_2b_records, amount_tolerance=10.0):
     findings = []
 
-    book_index = defaultdict(list)
-    portal_index = defaultdict(list)
+    books_by_doc = _index_by_document(book_records)
+    gstr_by_doc = _index_by_document(gstr_2b_records)
 
     for record in book_records:
-        document_id = _norm(getattr(record, "document_id", None))
-        gstin = _norm(getattr(record, "gstin", None))
-        amount = _amount(getattr(record, "amount", None))
+        doc = _clean_doc(getattr(record, "document_id", None))
+        gstin = _gstin(record)
+        amount = _amount_for_match(record)
 
-        if not document_id:
+        if not doc:
             findings.append(_finding(
                 record,
-                "books_missing_invoice_number",
+                "books_missing_invoice_number_for_gst",
                 "high",
-                "Books invoice missing invoice number",
-                "Books purchase/ITC entry does not have a usable invoice number, so it cannot be reliably matched with GSTR-2B.",
+                "Books entry missing invoice number",
+                "Books purchase/ITC entry has no invoice number, so it cannot be matched reliably with GSTR-2B.",
             ))
 
         if not gstin:
@@ -141,35 +266,31 @@ def run_gst_reconciliation_checks(book_records, gstr_2b_records, amount_toleranc
                 record,
                 "books_missing_supplier_gstin",
                 "high",
-                "Books invoice missing supplier GSTIN",
-                "Books purchase/ITC entry does not have supplier GSTIN, so GST reconciliation is weak.",
+                "Books entry missing supplier GSTIN",
+                "Books purchase/ITC entry has no supplier GSTIN. This weakens GST reconciliation and ITC validation.",
             ))
 
         if amount is None:
             findings.append(_finding(
                 record,
-                "books_missing_taxable_or_invoice_amount",
+                "books_missing_taxable_or_invoice_value",
                 "medium",
-                "Books invoice missing amount",
-                "Books purchase/ITC entry does not have a usable amount for GST reconciliation.",
+                "Books entry missing GST amount base",
+                "Books entry has no usable taxable value, invoice value, or amount for GST reconciliation.",
             ))
 
-        key = _key(record)
-        if key != ("", ""):
-            book_index[key].append(record)
-
     for record in gstr_2b_records:
-        document_id = _norm(getattr(record, "document_id", None))
-        gstin = _norm(getattr(record, "gstin", None))
-        amount = _amount(getattr(record, "amount", None))
+        doc = _clean_doc(getattr(record, "document_id", None))
+        gstin = _gstin(record)
+        amount = _amount_for_match(record)
 
-        if not document_id:
+        if not doc:
             findings.append(_finding(
                 record,
                 "gstr_2b_missing_invoice_number",
                 "medium",
-                "GSTR-2B row missing invoice number",
-                "GSTR-2B row does not have a usable invoice number.",
+                "GSTR-2B entry missing invoice number",
+                "GSTR-2B entry has no invoice number, so it cannot be matched reliably with books.",
             ))
 
         if not gstin:
@@ -177,105 +298,152 @@ def run_gst_reconciliation_checks(book_records, gstr_2b_records, amount_toleranc
                 record,
                 "gstr_2b_missing_supplier_gstin",
                 "medium",
-                "GSTR-2B row missing supplier GSTIN",
-                "GSTR-2B row does not have a usable supplier GSTIN.",
+                "GSTR-2B entry missing supplier GSTIN",
+                "GSTR-2B entry has no supplier GSTIN.",
             ))
 
         if amount is None:
             findings.append(_finding(
                 record,
-                "gstr_2b_missing_taxable_or_invoice_amount",
+                "gstr_2b_missing_taxable_or_invoice_value",
                 "medium",
-                "GSTR-2B row missing amount",
-                "GSTR-2B row does not have a usable taxable/invoice amount.",
+                "GSTR-2B entry missing GST amount base",
+                "GSTR-2B entry has no usable taxable value, invoice value, or amount.",
             ))
 
-        key = _key(record)
-        if key != ("", ""):
-            portal_index[key].append(record)
-
-    for key, records in book_index.items():
-        if len(records) > 1:
-            findings.append(_group_finding(
-                records,
-                "duplicate_invoice_in_books",
+    for doc, group in books_by_doc.items():
+        if len(group) > 1:
+            first = group[0]
+            findings.append(_finding(
+                first,
+                "duplicate_itc_invoice_in_books",
                 "high",
-                "Duplicate GST invoice in books",
-                "Same invoice number and supplier GSTIN appears multiple times in books. Check duplicate ITC booking.",
-                {"match_key": key},
+                "Duplicate ITC invoice in books",
+                "Same invoice/reference appears multiple times in books purchase/ITC data. Review duplicate ITC claim risk.",
+                extra={
+                    "document_key": doc,
+                    "duplicate_count": len(group),
+                    "book_records": [_record_display(record) for record in group],
+                },
             ))
 
-    for key, records in portal_index.items():
-        if len(records) > 1:
-            findings.append(_group_finding(
-                records,
+    for doc, group in gstr_by_doc.items():
+        if len(group) > 1:
+            first = group[0]
+            findings.append(_finding(
+                first,
                 "duplicate_invoice_in_gstr_2b",
                 "medium",
-                "Duplicate GST invoice in GSTR-2B",
-                "Same invoice number and supplier GSTIN appears multiple times in GSTR-2B export.",
-                {"match_key": key},
+                "Duplicate invoice in GSTR-2B",
+                "Same invoice/reference appears multiple times in GSTR-2B data. Verify supplier filing and duplicate rows.",
+                extra={
+                    "document_key": doc,
+                    "duplicate_count": len(group),
+                    "gstr_2b_records": [_record_display(record) for record in group],
+                },
             ))
 
-    for key, books in book_index.items():
-        if key not in portal_index:
-            for record in books:
+    for doc, book_group in books_by_doc.items():
+        if doc not in gstr_by_doc:
+            for book_record in book_group:
                 findings.append(_finding(
-                    record,
-                    "itc_in_books_not_in_gstr_2b",
+                    book_record,
+                    "itc_in_books_not_found_in_gstr_2b",
                     "high",
                     "ITC in books not found in GSTR-2B",
-                    "Purchase/ITC entry exists in books but matching supplier GSTIN and invoice number was not found in GSTR-2B.",
-                    {"match_key": key},
+                    "Books purchase/ITC entry exists, but matching invoice was not found in GSTR-2B.",
+                    extra={"document_key": doc},
                 ))
             continue
 
-        portal_records = portal_index[key]
+        gstr_group = gstr_by_doc[doc]
 
-        for book_record in books:
-            book_amount = _amount(getattr(book_record, "amount", None))
-            if book_amount is None:
-                continue
+        for book_record in book_group:
+            book_amount = _amount_for_match(book_record)
+            book_gstin = _gstin(book_record)
+            book_party = _party(book_record)
 
-            closest_portal = None
+            closest = None
             closest_diff = None
 
-            for portal_record in portal_records:
-                portal_amount = _amount(getattr(portal_record, "amount", None))
-                if portal_amount is None:
+            for gstr_record in gstr_group:
+                gstr_amount = _amount_for_match(gstr_record)
+
+                if book_amount is None or gstr_amount is None:
                     continue
 
-                diff = abs(abs(book_amount) - abs(portal_amount))
+                diff = abs(abs(book_amount) - abs(gstr_amount))
 
-                if closest_diff is None or diff < closest_diff:
+                if closest is None or diff < closest_diff:
+                    closest = gstr_record
                     closest_diff = diff
-                    closest_portal = portal_record
 
-            if closest_portal is not None and closest_diff is not None and closest_diff > amount_tolerance:
+            if closest is None:
+                continue
+
+            gstr_amount = _amount_for_match(closest)
+            gstr_gstin = _gstin(closest)
+            gstr_party = _party(closest)
+
+            if closest_diff is not None and closest_diff > amount_tolerance:
                 findings.append(_finding(
                     book_record,
-                    "gst_amount_mismatch_books_vs_2b",
-                    "medium",
-                    "GST reconciliation amount mismatch",
-                    "Invoice exists in both books and GSTR-2B, but amount differs beyond tolerance.",
-                    {
-                        "match_key": key,
+                    "books_vs_gstr_2b_amount_mismatch",
+                    "high",
+                    "Books amount does not match GSTR-2B",
+                    "Invoice exists in both books and GSTR-2B, but taxable/invoice value differs beyond tolerance.",
+                    matched_record=closest,
+                    extra={
+                        "document_key": doc,
                         "books_amount": book_amount,
-                        "gstr_2b_amount": _amount(getattr(closest_portal, "amount", None)),
+                        "gstr_2b_amount": gstr_amount,
                         "difference": round(closest_diff, 2),
-                        "gstr_2b_record": _display(closest_portal),
                     },
                 ))
 
-    for key, portal_records in portal_index.items():
-        if key not in book_index:
-            for record in portal_records:
+            if book_gstin and gstr_gstin and book_gstin.upper() != gstr_gstin.upper():
                 findings.append(_finding(
-                    record,
-                    "gstr_2b_invoice_not_booked",
+                    book_record,
+                    "books_vs_gstr_2b_gstin_mismatch",
+                    "high",
+                    "Supplier GSTIN mismatch",
+                    "Invoice exists in both books and GSTR-2B, but supplier GSTIN differs.",
+                    matched_record=closest,
+                    extra={
+                        "document_key": doc,
+                        "books_gstin": book_gstin,
+                        "gstr_2b_gstin": gstr_gstin,
+                    },
+                ))
+
+            party_score = _similarity(book_party, gstr_party)
+
+            if book_party and gstr_party and party_score < 0.55:
+                findings.append(_finding(
+                    book_record,
+                    "books_vs_gstr_2b_supplier_name_mismatch",
+                    "medium",
+                    "Supplier name mismatch",
+                    "Invoice exists in both books and GSTR-2B, but supplier name appears different.",
+                    matched_record=closest,
+                    extra={
+                        "document_key": doc,
+                        "books_party": book_party,
+                        "gstr_2b_party": gstr_party,
+                        "similarity": round(party_score, 2),
+                    },
+                ))
+
+    for doc, gstr_group in gstr_by_doc.items():
+        if doc not in books_by_doc:
+            for gstr_record in gstr_group:
+                findings.append(_finding(
+                    gstr_record,
+                    "gstr_2b_invoice_not_found_in_books",
                     "medium",
                     "GSTR-2B invoice not found in books",
-                    "Invoice exists in GSTR-2B but matching books entry was not found. Check if purchase/ITC was missed or intentionally not booked.",
-                    {"match_key": key},
+                    "Invoice exists in GSTR-2B, but no matching books purchase/ITC entry was found.",
+                    extra={"document_key": doc},
                 ))
 
     return findings

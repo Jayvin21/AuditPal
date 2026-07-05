@@ -27,12 +27,15 @@ def _clean_doc(value):
 def _amount(value):
     if value is None:
         return None
+
     try:
         if isinstance(value, Decimal):
             return float(value)
+
         cleaned = str(value).replace(",", "").replace("₹", "").strip()
         if cleaned == "":
             return None
+
         return float(cleaned)
     except (ValueError, InvalidOperation):
         return None
@@ -40,11 +43,20 @@ def _amount(value):
 
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
-    lowered = {str(k).strip().lower(): v for k, v in raw.items()}
+    source_values = raw.get("source_row_values", {}) if isinstance(raw, dict) else {}
+
+    lowered = {}
+
+    for data in [raw, source_values]:
+        if isinstance(data, dict):
+            lowered.update({str(k).strip().lower(): v for k, v in data.items()})
 
     for key in keys:
-        if key in raw and raw[key] not in [None, ""]:
+        if isinstance(raw, dict) and key in raw and raw[key] not in [None, ""]:
             return raw[key]
+
+        if isinstance(source_values, dict) and key in source_values and source_values[key] not in [None, ""]:
+            return source_values[key]
 
         lowered_key = key.strip().lower()
         if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
@@ -56,34 +68,47 @@ def _raw(record, *keys):
 def _party(record):
     return (
         getattr(record, "party_name", None)
-        or _raw(record, "Vendor Name", "Supplier Name", "Party Name", "Customer Name", "Name")
+        or _raw(record, "party_name", "Vendor Name", "Supplier Name", "Party Name", "Customer Name", "Name")
         or ""
     )
 
 
 def _description(record):
     return (
-        _raw(record, "Description", "Narration", "Particulars", "OCR Text", "Extracted Text", "Text")
+        _raw(record, "extracted_text", "description", "OCR Text", "Extracted Text", "Text", "Description", "Narration", "Particulars")
         or getattr(record, "description", None)
         or ""
     )
 
 
 def _confidence(record):
-    value = _raw(record, "OCR Confidence", "Confidence", "confidence_score", "Extraction Confidence")
+    value = _raw(record, "ocr_confidence", "OCR Confidence", "Confidence", "confidence_score", "Extraction Confidence")
+
     parsed = _amount(value)
+
     if parsed is None:
         parsed = getattr(record, "confidence", None)
 
     try:
         if parsed is None:
             return None
+
         parsed = float(parsed)
+
         if parsed > 1:
             parsed = parsed / 100
+
         return parsed
     except Exception:
         return None
+
+
+def _document_type(record):
+    return _raw(record, "document_type", "Document Type", "Doc Type", "Invoice Type", "Bill Type") or ""
+
+
+def _support_file_name(record):
+    return _raw(record, "support_file_name", "Support File Name", "File Name", "Filename", "Source File") or ""
 
 
 def _display(record):
@@ -95,6 +120,9 @@ def _display(record):
         "transaction_date": str(getattr(record, "transaction_date", "") or ""),
         "amount": getattr(record, "amount", None),
         "confidence": _confidence(record),
+        "document_type": _document_type(record),
+        "support_file_name": _support_file_name(record),
+        "description": _description(record),
         "record_type": getattr(record, "record_type", None),
     }
 
@@ -153,6 +181,7 @@ def run_document_match_checks(book_records, support_records, amount_tolerance=10
 
     for record in book_records:
         doc = _clean_doc(getattr(record, "document_id", None))
+
         if doc:
             books_by_doc[doc].append(record)
 
@@ -160,6 +189,7 @@ def run_document_match_checks(book_records, support_records, amount_tolerance=10
         doc = _clean_doc(getattr(record, "document_id", None))
         confidence = _confidence(record)
         amount = _amount(getattr(record, "amount", None))
+        extracted_text = _description(record)
 
         if not doc:
             findings.append(_finding(
@@ -187,6 +217,15 @@ def run_document_match_checks(book_records, support_records, amount_tolerance=10
                 "Low OCR confidence support document",
                 "Supporting document extraction confidence is low. Manual verification is recommended.",
                 {"ocr_confidence": confidence},
+            ))
+
+        if not extracted_text:
+            findings.append(_finding(
+                record,
+                "support_document_missing_extracted_text",
+                "low",
+                "Support document missing extracted text",
+                "Support/OCR record has no extracted text field. Manual traceability is weaker.",
             ))
 
         if doc:
@@ -232,6 +271,7 @@ def run_document_match_checks(book_records, support_records, amount_tolerance=10
 
             for support_record in support_group:
                 support_amount = _amount(getattr(support_record, "amount", None))
+
                 if book_amount is None or support_amount is None:
                     continue
 
