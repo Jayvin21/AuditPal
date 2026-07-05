@@ -52,11 +52,19 @@ def _is_year_end(value):
 
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
-    lowered = {str(k).strip().lower(): v for k, v in raw.items()}
+    source_values = raw.get("source_row_values", {}) if isinstance(raw, dict) else {}
+
+    lowered = {}
+    for data in [raw, source_values]:
+        if isinstance(data, dict):
+            lowered.update({str(k).strip().lower(): v for k, v in data.items()})
 
     for key in keys:
-        if key in raw and raw[key] not in [None, ""]:
+        if isinstance(raw, dict) and key in raw and raw[key] not in [None, ""]:
             return raw[key]
+
+        if isinstance(source_values, dict) and key in source_values and source_values[key] not in [None, ""]:
+            return source_values[key]
 
         lowered_key = key.strip().lower()
         if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
@@ -76,19 +84,23 @@ def _description(record):
 def _party(record):
     return (
         getattr(record, "party_name", None)
-        or _raw(record, "Party Name", "Vendor Name", "Supplier Name", "Name 1", "Particulars")
+        or _raw(record, "party_name", "Party Name", "Vendor Name", "Supplier Name", "Name 1", "Particulars")
         or ""
     )
 
 
 def _pan(record):
-    return _raw(record, "PAN", "Vendor PAN", "Supplier PAN", "Permanent Account Number", "PAN No", "PAN Number") or ""
+    return _raw("pan") if False else (
+        _raw(record, "pan", "PAN", "Vendor PAN", "Supplier PAN", "Permanent Account Number", "PAN No", "PAN Number")
+        or ""
+    )
 
 
 def _tds_amount(record):
     return _amount(
         _raw(
             record,
+            "tds_amount",
             "TDS Deducted",
             "TDS Amount",
             "Tax Deducted",
@@ -101,12 +113,15 @@ def _tds_amount(record):
 
 
 def _tds_section(record):
-    return _raw(record, "TDS Section", "Section", "TDS Nature", "194C/194J", "Withholding Tax Code", "WHT Code") or ""
+    return (
+        _raw(record, "tds_section", "TDS Section", "Section", "TDS Nature", "194C/194J", "Withholding Tax Code", "WHT Code")
+        or ""
+    )
 
 
 def _nature(record):
     return (
-        _raw(record, "Nature", "Expense Nature", "Payment Nature", "Ledger Name", "G/L Account", "GL Account")
+        _raw(record, "payment_nature", "Nature", "Expense Nature", "Payment Nature", "Ledger Name", "G/L Account", "GL Account")
         or _description(record)
         or _party(record)
     )

@@ -51,11 +51,19 @@ def _amount(value):
 
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
-    lowered = {str(k).strip().lower(): v for k, v in raw.items()}
+    source_values = raw.get("source_row_values", {}) if isinstance(raw, dict) else {}
+
+    lowered = {}
+    for data in [raw, source_values]:
+        if isinstance(data, dict):
+            lowered.update({str(k).strip().lower(): v for k, v in data.items()})
 
     for key in keys:
-        if key in raw and raw[key] not in [None, ""]:
+        if isinstance(raw, dict) and key in raw and raw[key] not in [None, ""]:
             return raw[key]
+
+        if isinstance(source_values, dict) and key in source_values and source_values[key] not in [None, ""]:
+            return source_values[key]
 
         lowered_key = key.strip().lower()
         if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
@@ -66,28 +74,29 @@ def _raw(record, *keys):
 
 def _ledger_name(record):
     return (
-        getattr(record, "party_name", None)
-        or _raw(record, "Ledger Name", "Account Name", "Account", "Particulars", "G/L Account", "GL Account", "Ledger")
+        _raw(record, "ledger_name", "Ledger Name", "Account Name", "Account", "Particulars", "G/L Account", "GL Account", "Ledger")
+        or getattr(record, "party_name", None)
         or ""
     )
 
 
 def _group(record):
-    return _raw(record, "Group", "Primary Group", "Schedule", "FS Group", "Classification", "Nature") or ""
+    return _raw(record, "ledger_group", "Group", "Primary Group", "Schedule", "FS Group", "Classification", "Nature") or ""
 
 
 def _debit(record):
-    return _amount(_raw(record, "Debit", "Debit Balance", "Dr", "Dr Balance"))
+    return _amount(_raw(record, "debit_balance", "Debit", "Debit Balance", "Dr", "Dr Balance"))
 
 
 def _credit(record):
-    return _amount(_raw(record, "Credit", "Credit Balance", "Cr", "Cr Balance"))
+    return _amount(_raw(record, "credit_balance", "Credit", "Credit Balance", "Cr", "Cr Balance"))
 
 
 def _closing_balance(record):
     direct = _amount(
         _raw(
             record,
+            "closing_balance",
             "Closing Balance",
             "Balance",
             "Amount",
@@ -147,7 +156,7 @@ def _title(base, record):
     if ledger:
         bits.append(ledger)
     if balance is not None:
-        bits.append(f"₹{abs(balance):,.0f} { _balance_side(balance) }")
+        bits.append(f"₹{abs(balance):,.0f} {_balance_side(balance)}")
 
     if not bits:
         return base
@@ -313,20 +322,18 @@ def run_trial_balance_checks(records):
 
     difference = round(abs(total_debit_balance - total_credit_balance), 2)
 
-    if difference > 1:
-        pseudo_record = records[0] if records else None
-        if pseudo_record:
-            findings.append(_finding(
-                pseudo_record,
-                "trial_balance_not_balanced",
-                "high",
-                "Trial balance debit/credit totals do not match",
-                "Total debit balances and total credit balances do not agree. Review export format, missing rows, or mapping.",
-                {
-                    "total_debit_balance": round(total_debit_balance, 2),
-                    "total_credit_balance": round(total_credit_balance, 2),
-                    "difference": difference,
-                },
-            ))
+    if difference > 1 and records:
+        findings.append(_finding(
+            records[0],
+            "trial_balance_not_balanced",
+            "high",
+            "Trial balance debit/credit totals do not match",
+            "Total debit balances and total credit balances do not agree. Review export format, missing rows, or mapping.",
+            {
+                "total_debit_balance": round(total_debit_balance, 2),
+                "total_credit_balance": round(total_credit_balance, 2),
+                "difference": difference,
+            },
+        ))
 
     return findings

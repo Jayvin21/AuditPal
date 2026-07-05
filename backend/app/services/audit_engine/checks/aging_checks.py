@@ -28,11 +28,19 @@ def _amount(value):
 
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
-    lowered = {str(k).strip().lower(): v for k, v in raw.items()}
+    source_values = raw.get("source_row_values", {}) if isinstance(raw, dict) else {}
+
+    lowered = {}
+    for data in [raw, source_values]:
+        if isinstance(data, dict):
+            lowered.update({str(k).strip().lower(): v for k, v in data.items()})
 
     for key in keys:
-        if key in raw and raw[key] not in [None, ""]:
+        if isinstance(raw, dict) and key in raw and raw[key] not in [None, ""]:
             return raw[key]
+
+        if isinstance(source_values, dict) and key in source_values and source_values[key] not in [None, ""]:
+            return source_values[key]
 
         lowered_key = key.strip().lower()
         if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
@@ -80,26 +88,27 @@ def _date_string(value):
 def _party(record):
     return (
         getattr(record, "party_name", None)
-        or _raw(record, "Party Name", "Customer Name", "Vendor Name", "Supplier Name", "Name 1", "Account")
+        or _raw(record, "party_name", "Party Name", "Customer Name", "Vendor Name", "Supplier Name", "Name 1", "Account")
         or ""
     )
 
 
 def _invoice_date(record):
     return (
-        getattr(record, "transaction_date", None)
-        or _raw(record, "Invoice Date", "Bill Date", "Document Date", "Posting Date", "Date")
+        _raw(record, "invoice_date", "Invoice Date", "Bill Date", "Document Date", "Posting Date", "Date")
+        or getattr(record, "transaction_date", None)
     )
 
 
 def _due_date(record):
-    return _raw(record, "Due Date", "Payment Due Date", "Net Due Date", "Aging Date", "Due") or ""
+    return _raw(record, "due_date", "Due Date", "Payment Due Date", "Net Due Date", "Aging Date", "Due") or ""
 
 
 def _outstanding(record):
     return _amount(
         _raw(
             record,
+            "outstanding_amount",
             "Outstanding",
             "Outstanding Amount",
             "Balance",
@@ -117,7 +126,7 @@ def _days_overdue(record, as_of=None):
     if as_of is None:
         as_of = date.today()
 
-    direct = _amount(_raw(record, "Days Overdue", "Overdue Days", "Age", "Aging Days", "Days"))
+    direct = _amount(_raw(record, "days_overdue", "Days Overdue", "Overdue Days", "Age", "Aging Days", "Days"))
     if direct is not None:
         return int(direct)
 
@@ -144,10 +153,16 @@ def _bucket(days):
     return "180_plus"
 
 
+def _party_type(record):
+    return _lower(_raw(record, "party_type", "Party Type", "Type", "Nature") or "")
+
+
 def _is_receivable(record):
     typ = _lower(getattr(record, "record_type", ""))
+    party_type = _party_type(record)
     text = " ".join([
         typ,
+        party_type,
         _lower(_raw(record, "Report Type", "Type", "Nature") or ""),
         _lower(_party(record)),
     ])
@@ -156,8 +171,10 @@ def _is_receivable(record):
 
 def _is_payable(record):
     typ = _lower(getattr(record, "record_type", ""))
+    party_type = _party_type(record)
     text = " ".join([
         typ,
+        party_type,
         _lower(_raw(record, "Report Type", "Type", "Nature") or ""),
         _lower(_party(record)),
     ])
@@ -198,6 +215,7 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
         "days_overdue": days,
         "aging_bucket": _bucket(days),
         "outstanding_amount": outstanding,
+        "party_type": _party_type(record),
         "record_type": getattr(record, "record_type", None),
     }
 
