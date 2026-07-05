@@ -1,0 +1,12 @@
+Voucher No,Date,Party Name,PAN,Nature,Amount,TDS Deducted,TDS Section,Narration
+TDS-001,01-04-2025,ABC Consultants,ABCDE1234F,Professional Fees,50000,5000,194J,Proper TDS deducted
+TDS-002,05-04-2025,No TDS Consultant,BCDEF2345G,Consultancy Charges,75000,0,,Possible TDS not deducted
+TDS-003,10-04-2025,No PAN Contractor,,Contractor Payment,90000,0,,Missing PAN and TDS
+TDS-004,15-04-2025,Rent Owner,CDEFG3456H,Rent,120000,12000,,TDS deducted but section missing
+TDS-005,31-03-2026,Year End Legal Firm,DEFGH4567I,Legal Fees,150000,0,,Year-end professional payment
+TDS-006,20-05-2025,Commission Agent,EFGHI5678J,Commission,30000,0,,Threshold payment no TDS
+TDS-007,22-05-2025,Interest Party,FGHIJ6789K,Interest,60000,6000,194A,TDS deducted
+TDS-008,24-05-2025,Regular Supplier,GHIJK7890L,Purchase of goods,40000,0,,Non-TDS normal purchase
+TDS-009,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Repeated same amount
+TDS-010,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Repeated same amount
+TDS-010,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Duplicate voucher

@@ -74,6 +74,7 @@ type AuditRunResponse = {
     gstr_2b_records?: number;
     checked_records?: number;
     ledger_records_checked?: number;
+    tds_records_checked?: number;
     unchecked_records: number;
     issues_found: number;
     risk_counts?: Record<string, number>;
@@ -433,6 +434,25 @@ export default function WorkspaceDetailPage() {
 
 
 
+
+  async function runTdsReview() {
+    setBusy(true);
+    setStatusMessage("Running TDS review...");
+
+    try {
+      const res = await api.post(`/audit-runs/${workspaceId}/run-tds-review`);
+      setAuditSummary(res.data);
+      setSelectedAuditRunId(res.data.audit_run_id);
+      setStatusMessage("TDS review completed.");
+      await refreshAll();
+      setActiveSection("findings");
+    } catch {
+      setStatusMessage("TDS review failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runLedgerScrutiny() {
     setBusy(true);
     setStatusMessage("Running ledger scrutiny...");
@@ -735,6 +755,7 @@ export default function WorkspaceDetailPage() {
                 runPurchaseAudit={runPurchaseAudit}
                 runSalesAudit={runSalesAudit}
                 runExpenseAudit={runExpenseAudit}
+                runTdsReview={runTdsReview}
                 runLedgerScrutiny={runLedgerScrutiny}
                 runGstReconciliation={runGstReconciliation}
                 runBankReconciliation={runBankReconciliation}
@@ -1014,6 +1035,7 @@ function FilesSection({
             <option value="tally_purchase_register">Tally Purchase Register</option>
             <option value="generic_sales_register">Sales Register</option>
             <option value="expense_ledger">Expense Ledger</option>
+            <option value="tds_ledger">TDS Ledger</option>
             <option value="tally_ledger_vouchers">Tally Ledger Vouchers</option>
             <option value="bank_statement">Bank Statement</option>
             <option value="cash_bank_ledger">Cash / Bank Ledger</option>
@@ -1223,6 +1245,7 @@ function AuditSection({
   runPurchaseAudit,
   runSalesAudit,
   runExpenseAudit,
+  runTdsReview,
   runLedgerScrutiny,
   runGstReconciliation,
   runBankReconciliation,
@@ -1238,6 +1261,7 @@ function AuditSection({
   runPurchaseAudit: () => void;
   runSalesAudit: () => void;
   runExpenseAudit: () => void;
+  runTdsReview: () => void;
   runLedgerScrutiny: () => void;
   runGstReconciliation: () => void;
   runBankReconciliation: () => void;
@@ -1270,6 +1294,12 @@ function AuditSection({
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
+    },
+    {
+      key: "tds",
+      label: "TDS Review",
+      description: "Reviews vendor/expense payments for possible TDS non-deduction, missing PAN, missing section, high-value payments, and duplicate vouchers.",
+      run: runTdsReview,
     },
     {
       key: "ledger",
@@ -1311,6 +1341,7 @@ function AuditSection({
     coverageSource?.sales_records_checked ??
     coverageSource?.expense_records_checked ??
     coverageSource?.ledger_records_checked ??
+    coverageSource?.tds_records_checked ??
     0;
 
   return (
@@ -1925,8 +1956,10 @@ function formatAuditType(type: string) {
   if (type === "purchase_audit") return "Purchase Audit";
   if (type === "sales_audit") return "Sales Audit";
   if (type === "expense_audit") return "Expense Audit";
+  if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "gst_reconciliation") return "GST Reconciliation";
+  if (type === "tds_review") return "TDS Review";
   if (type === "ledger_scrutiny") return "Ledger Scrutiny";
   if (type === "bank_reconciliation") return "Bank Reconciliation";
   return type;
@@ -2061,6 +2094,7 @@ function inferRecommendedAuditModule(files?: UploadedFile[]) {
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("tds")) return "tds";
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
   if (type.includes("expense")) return "expense";

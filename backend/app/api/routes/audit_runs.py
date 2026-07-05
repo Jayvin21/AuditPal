@@ -9,6 +9,7 @@ from app.services.audit_engine.runner import (
     run_expense_audit,
     run_gst_reconciliation,
     run_ledger_scrutiny,
+    run_tds_review,
     run_purchase_audit,
     run_sales_audit,
 )
@@ -38,6 +39,14 @@ def run_real_expense_audit(workspace_id: int, db: Session = Depends(get_db)):
         return run_expense_audit(workspace_id=workspace_id, db=db)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Expense audit failed: {str(exc)}")
+
+
+@router.post("/{workspace_id}/run-tds-review")
+def run_real_tds_review(workspace_id: int, db: Session = Depends(get_db)):
+    try:
+        return run_tds_review(workspace_id=workspace_id, db=db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"TDS review failed: {str(exc)}")
 
 
 @router.post("/{workspace_id}/run-ledger-scrutiny")

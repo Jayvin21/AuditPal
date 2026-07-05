@@ -13,19 +13,23 @@ CHECKS_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------
-# 1. Ledger scrutiny checks
+# 1. TDS review checks
 # ----------------------------------------------------
 
-(CHECKS_DIR / "ledger_scrutiny_checks.py").write_text(
+(CHECKS_DIR / "tds_checks.py").write_text(
 r'''from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 
-SUSPENSE_KEYWORDS = ["suspense", "temporary", "dummy", "unclassified", "unknown"]
-CASH_KEYWORDS = ["cash", "petty cash"]
-LOAN_ADVANCE_KEYWORDS = ["loan", "advance", "deposit", "unsecured loan", "director loan"]
-MANUAL_ENTRY_KEYWORDS = ["journal", "manual", "jv", "adjustment", "provision", "rectification"]
+TDS_SENSITIVE_KEYWORDS = {
+    "professional": ["professional", "consultancy", "consultant", "technical fees", "legal fees", "audit fees", "ca fees"],
+    "contractor": ["contractor", "contract", "labour", "job work", "works contract"],
+    "rent": ["rent", "lease", "premises"],
+    "commission": ["commission", "brokerage"],
+    "interest": ["interest"],
+    "royalty": ["royalty"],
+}
 
 
 def _norm(value):
@@ -67,30 +71,72 @@ def _is_year_end(value):
 
 def _raw(record, *keys):
     raw = getattr(record, "raw_data", None) or {}
+    lowered = {str(k).strip().lower(): v for k, v in raw.items()}
+
     for key in keys:
         if key in raw and raw[key] not in [None, ""]:
             return raw[key]
+
+        lowered_key = key.strip().lower()
+        if lowered_key in lowered and lowered[lowered_key] not in [None, ""]:
+            return lowered[lowered_key]
+
     return None
 
 
 def _description(record):
     return (
-        _raw(record, "description", "narration", "Narration", "Description", "Particulars", "Text")
+        _raw(record, "description", "narration", "Narration", "Description", "Particulars", "Text", "Nature")
         or getattr(record, "description", None)
         or ""
     )
 
 
-def _voucher_type(record):
-    return _raw(record, "Voucher Type", "voucher_type", "Document Type", "document_type", "Entry Type") or ""
-
-
-def _ledger_name(record):
+def _party(record):
     return (
         getattr(record, "party_name", None)
-        or _raw(record, "Ledger Name", "G/L Account", "GL Account", "Account", "Particulars", "Cost Center")
+        or _raw(record, "Party Name", "Vendor Name", "Supplier Name", "Name 1", "Particulars")
         or ""
     )
+
+
+def _pan(record):
+    return _raw(record, "PAN", "Vendor PAN", "Supplier PAN", "Permanent Account Number", "PAN No", "PAN Number") or ""
+
+
+def _tds_amount(record):
+    return _amount(
+        _raw(
+            record,
+            "TDS Deducted",
+            "TDS Amount",
+            "Tax Deducted",
+            "TDS",
+            "Withholding Tax",
+            "WHT Amount",
+            "TDS Payable",
+        )
+    )
+
+
+def _tds_section(record):
+    return _raw(record, "TDS Section", "Section", "TDS Nature", "194C/194J", "Withholding Tax Code", "WHT Code") or ""
+
+
+def _nature(record):
+    return (
+        _raw(record, "Nature", "Expense Nature", "Payment Nature", "Ledger Name", "G/L Account", "GL Account")
+        or _description(record)
+        or _party(record)
+    )
+
+
+def _tds_category(text):
+    text = text.lower()
+    for category, keywords in TDS_SENSITIVE_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+    return ""
 
 
 def _money(value):
@@ -102,14 +148,15 @@ def _money(value):
 
 def _title(base, record):
     bits = []
+
     doc = _norm(getattr(record, "document_id", None))
-    ledger = _norm(_ledger_name(record))
+    party = _norm(_party(record))
     amount = _money(getattr(record, "amount", None))
 
     if doc:
         bits.append(doc)
-    if ledger:
-        bits.append(ledger)
+    if party:
+        bits.append(party)
     if amount:
         bits.append(amount)
 
@@ -124,12 +171,14 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
         "record_id": getattr(record, "id", None),
         "source_row": getattr(record, "source_row", None),
         "document_id": getattr(record, "document_id", None),
-        "ledger_name": _ledger_name(record),
-        "party_name": getattr(record, "party_name", None),
+        "party_name": _party(record),
         "transaction_date": _date_string(getattr(record, "transaction_date", None)),
         "amount": getattr(record, "amount", None),
+        "pan": _pan(record),
+        "tds_amount": _tds_amount(record),
+        "tds_section": _tds_section(record),
+        "nature": _nature(record),
         "description": _description(record),
-        "voucher_type": _voucher_type(record),
         "record_type": getattr(record, "record_type", None),
     }
 
@@ -146,136 +195,132 @@ def _finding(record, finding_type, risk_level, title, description, extra=None):
     }
 
 
-def run_ledger_scrutiny_checks(records):
+def run_tds_checks(records):
     findings = []
     voucher_index = defaultdict(list)
-    ledger_amount_date_index = defaultdict(list)
+    party_amount_date_index = defaultdict(list)
 
     for record in records:
         document_id = _norm(getattr(record, "document_id", None))
-        ledger_name = _norm(_ledger_name(record))
-        ledger_lower = ledger_name.lower()
-        description = _description(record)
-        description_lower = description.lower()
-        voucher_type = _voucher_type(record)
-        voucher_type_lower = voucher_type.lower()
+        party = _party(record)
         amount = _amount(getattr(record, "amount", None))
         txn_date = getattr(record, "transaction_date", None)
         txn_date_text = _date_string(txn_date)
+        description = _description(record)
+        nature = _nature(record)
+        combined_text = " ".join([_lower(party), _lower(description), _lower(nature)])
 
-        combined_text = " ".join([ledger_lower, description_lower, voucher_type_lower])
+        pan = _norm(_pan(record)).upper()
+        tds_amount = _tds_amount(record)
+        tds_section = _norm(_tds_section(record))
+        category = _tds_category(combined_text)
 
         if document_id:
             voucher_index[document_id.lower()].append(record)
 
-        if ledger_name and amount is not None and txn_date_text:
-            ledger_amount_date_index[(ledger_lower, round(abs(amount), 2), txn_date_text)].append(record)
-
-        if not document_id:
-            findings.append(_finding(
-                record,
-                "missing_ledger_voucher_number",
-                "medium",
-                "Missing ledger voucher/reference number",
-                "Ledger entry has no voucher, document, reference, or journal number.",
-            ))
-
-        if not ledger_name:
-            findings.append(_finding(
-                record,
-                "missing_ledger_name",
-                "medium",
-                "Missing ledger/account name",
-                "Ledger entry does not identify the ledger, account, party, cost center, or G/L account.",
-            ))
+        if party and amount is not None and txn_date_text:
+            party_amount_date_index[(party.lower(), round(abs(amount), 2), txn_date_text)].append(record)
 
         if amount is None:
             findings.append(_finding(
                 record,
-                "missing_ledger_amount",
-                "high",
-                "Missing ledger amount",
-                "Ledger entry does not contain a usable amount.",
+                "tds_review_missing_payment_amount",
+                "medium",
+                "Missing payment amount for TDS review",
+                "Entry does not contain a usable payment/expense amount, so TDS applicability cannot be assessed reliably.",
             ))
             continue
 
-        if abs(amount) >= 100000:
-            findings.append(_finding(
-                record,
-                "high_value_ledger_entry",
-                "high",
-                "High-value ledger entry",
-                "Ledger entry is above ₹1,00,000 and should be verified with supporting documents and approval trail.",
-                {"amount": amount},
-            ))
+        if category:
+            if amount >= 30000 and (tds_amount is None or tds_amount <= 0):
+                findings.append(_finding(
+                    record,
+                    "possible_tds_not_deducted",
+                    "high",
+                    "Possible TDS not deducted",
+                    "Payment appears TDS-sensitive and exceeds review threshold, but no TDS deducted amount is visible.",
+                    {
+                        "tds_category": category,
+                        "amount": amount,
+                        "tds_amount": tds_amount,
+                    },
+                ))
 
-        if abs(amount) >= 1000 and abs(amount) % 1000 == 0:
+            if not pan:
+                findings.append(_finding(
+                    record,
+                    "missing_vendor_pan_for_tds",
+                    "high",
+                    "Missing vendor PAN for TDS-sensitive payment",
+                    "Payment appears TDS-sensitive but vendor PAN is missing. This affects TDS compliance and reporting.",
+                    {
+                        "tds_category": category,
+                        "amount": amount,
+                    },
+                ))
+
+            if tds_amount is not None and tds_amount > 0 and not tds_section:
+                findings.append(_finding(
+                    record,
+                    "tds_deducted_section_missing",
+                    "medium",
+                    "TDS deducted but section/code missing",
+                    "TDS amount is present but TDS section or withholding tax code is missing.",
+                    {
+                        "tds_amount": tds_amount,
+                    },
+                ))
+
+            if amount >= 100000:
+                findings.append(_finding(
+                    record,
+                    "high_value_tds_sensitive_payment",
+                    "medium",
+                    "High-value TDS-sensitive payment",
+                    "High-value payment appears to fall under a TDS-sensitive category. Verify PAN, section, rate, deduction, and challan trail.",
+                    {
+                        "tds_category": category,
+                        "amount": amount,
+                    },
+                ))
+
+            if amount >= 1000 and amount % 1000 == 0:
+                findings.append(_finding(
+                    record,
+                    "round_number_tds_sensitive_payment",
+                    "low",
+                    "Round-number TDS-sensitive payment",
+                    "TDS-sensitive payment has a round amount. This can be normal but should be reviewed for estimate/manual booking.",
+                    {
+                        "tds_category": category,
+                        "amount": amount,
+                    },
+                ))
+
+            if _is_year_end(txn_date):
+                findings.append(_finding(
+                    record,
+                    "year_end_tds_sensitive_payment",
+                    "medium",
+                    "Year-end TDS-sensitive payment",
+                    "TDS-sensitive payment was booked near financial year end. Verify deduction timing, provision, and payment compliance.",
+                    {
+                        "tds_category": category,
+                        "transaction_date": txn_date_text,
+                    },
+                ))
+
+        elif tds_amount is not None and tds_amount > 0:
             findings.append(_finding(
                 record,
-                "round_number_ledger_entry",
+                "tds_deducted_on_uncategorized_payment",
                 "low",
-                "Round-number ledger entry",
-                "Ledger entry has a round amount. This can be normal, but should be reviewed for manual or estimated postings.",
-                {"amount": amount},
-            ))
-
-        if _is_year_end(txn_date):
-            findings.append(_finding(
-                record,
-                "year_end_ledger_entry",
-                "medium",
-                "Year-end ledger entry",
-                "Ledger entry was posted near financial year end. Review cut-off, provisioning, reversal, and supporting documents.",
-                {"transaction_date": txn_date_text},
-            ))
-
-        if any(keyword in combined_text for keyword in SUSPENSE_KEYWORDS):
-            findings.append(_finding(
-                record,
-                "suspense_or_temporary_account_activity",
-                "high",
-                "Suspense/temporary account activity",
-                "Ledger entry appears to involve suspense, temporary, dummy, unknown, or unclassified accounts.",
-                {"matched_text": combined_text},
-            ))
-
-        if any(keyword in combined_text for keyword in MANUAL_ENTRY_KEYWORDS):
-            findings.append(_finding(
-                record,
-                "manual_or_journal_entry",
-                "medium",
-                "Manual/journal entry indicator",
-                "Ledger entry appears to be a manual, journal, adjustment, provision, or rectification posting.",
-                {"voucher_type": voucher_type, "description": description},
-            ))
-
-        if any(keyword in combined_text for keyword in CASH_KEYWORDS) and abs(amount) >= 10000:
-            findings.append(_finding(
-                record,
-                "high_value_cash_ledger_activity",
-                "high",
-                "High-value cash ledger activity",
-                "Cash or petty-cash ledger activity above ₹10,000 should be reviewed for tax/audit sensitivity and supporting documents.",
-                {"amount": amount},
-            ))
-
-        if any(keyword in combined_text for keyword in LOAN_ADVANCE_KEYWORDS) and abs(amount) >= 50000:
-            findings.append(_finding(
-                record,
-                "loan_or_advance_movement",
-                "medium",
-                "Loan/advance/deposit ledger movement",
-                "Ledger entry appears to involve loans, advances, deposits, or unsecured loan movement. Verify agreement, confirmation, and classification.",
-                {"amount": amount},
-            ))
-
-        if not description or len(description.strip()) < 4:
-            findings.append(_finding(
-                record,
-                "missing_or_weak_ledger_narration",
-                "low",
-                "Missing or weak ledger narration",
-                "Ledger entry has no meaningful narration, text, or description.",
+                "TDS deducted on uncategorized payment",
+                "TDS amount is present, but payment nature was not clearly classified by the rule engine.",
+                {
+                    "tds_amount": tds_amount,
+                    "nature": nature,
+                },
             ))
 
     for voucher, duplicate_records in voucher_index.items():
@@ -283,10 +328,10 @@ def run_ledger_scrutiny_checks(records):
             first = duplicate_records[0]
             findings.append(_finding(
                 first,
-                "duplicate_ledger_voucher_reference",
+                "duplicate_tds_payment_voucher",
                 "medium",
-                "Duplicate ledger voucher/reference",
-                "Same voucher/reference appears more than once in ledger data. Review whether this is valid multi-line accounting or duplicate posting.",
+                "Duplicate TDS/payment voucher reference",
+                "Same voucher/reference appears more than once in TDS-review data. Review whether this is valid multi-line accounting or duplicate booking.",
                 {
                     "voucher": voucher,
                     "duplicate_count": len(duplicate_records),
@@ -295,18 +340,18 @@ def run_ledger_scrutiny_checks(records):
                 },
             ))
 
-    for key, repeated_records in ledger_amount_date_index.items():
+    for key, repeated_records in party_amount_date_index.items():
         if len(repeated_records) > 1:
             first = repeated_records[0]
-            ledger_name, amount, txn_date = key
+            party, amount, txn_date = key
             findings.append(_finding(
                 first,
-                "repeated_ledger_pattern",
+                "repeated_tds_payment_pattern",
                 "medium",
-                "Repeated ledger amount/date pattern",
-                "Same ledger, same amount, and same date appears multiple times. Review for duplicate posting or repeated adjustment.",
+                "Repeated party/date/amount payment pattern",
+                "Same party, same amount, and same date appears multiple times. Review for duplicate payment or split booking.",
                 {
-                    "ledger_name": ledger_name,
+                    "party_name": party,
                     "amount": amount,
                     "transaction_date": txn_date,
                     "duplicate_count": len(repeated_records),
@@ -325,29 +370,20 @@ encoding="utf-8",
 
 runner = RUNNER.read_text(encoding="utf-8")
 
-if "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks" not in runner:
-    if "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks" in runner:
+if "from app.services.audit_engine.checks.tds_checks import run_tds_checks" not in runner:
+    if "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks" in runner:
         runner = runner.replace(
-            "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks",
-            "from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks\nfrom app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
+            "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
+            "from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks\nfrom app.services.audit_engine.checks.tds_checks import run_tds_checks",
         )
     else:
         runner = runner.replace(
-            "from app.services.audit_engine.checks.sales_checks import run_sales_checks",
-            "from app.services.audit_engine.checks.sales_checks import run_sales_checks\nfrom app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks",
+            "from app.services.audit_engine.checks.expense_checks import run_expense_checks",
+            "from app.services.audit_engine.checks.expense_checks import run_expense_checks\nfrom app.services.audit_engine.checks.tds_checks import run_tds_checks",
         )
 
-if "LEDGER_SCRUTINY_FILE_TYPES" not in runner:
-    marker = '''LEDGER_FILE_TYPES = {
-    "cash_bank_ledger",
-    "bank_ledger",
-    "ledger",
-    "tally_bank_book",
-}
-'''
-    addition = marker + '''
-
-LEDGER_SCRUTINY_FILE_TYPES = {
+if "TDS_FILE_TYPES" not in runner:
+    marker = '''LEDGER_SCRUTINY_FILE_TYPES = {
     "ledger",
     "expense_ledger",
     "tally_ledger_vouchers",
@@ -355,6 +391,18 @@ LEDGER_SCRUTINY_FILE_TYPES = {
     "cash_bank_ledger",
     "bank_ledger",
     "trial_balance",
+}
+'''
+    addition = marker + '''
+
+TDS_FILE_TYPES = {
+    "tds_ledger",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "sap_vendor_line_items",
+    "purchase_register",
+    "tally_purchase_register",
 }
 '''
     if marker in runner:
@@ -362,21 +410,21 @@ LEDGER_SCRUTINY_FILE_TYPES = {
     else:
         runner += '''
 
-LEDGER_SCRUTINY_FILE_TYPES = {
-    "ledger",
+TDS_FILE_TYPES = {
+    "tds_ledger",
     "expense_ledger",
     "tally_ledger_vouchers",
     "sap_gl_line_items",
-    "cash_bank_ledger",
-    "bank_ledger",
-    "trial_balance",
+    "sap_vendor_line_items",
+    "purchase_register",
+    "tally_purchase_register",
 }
 '''
 
-if "def run_ledger_scrutiny" not in runner:
-    ledger_function = r'''
+if "def run_tds_review" not in runner:
+    tds_function = r'''
 
-def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
+def run_tds_review(workspace_id: int, db: Session) -> dict:
     parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
 
     records = (
@@ -385,17 +433,17 @@ def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
         .all()
     )
 
-    ledger_records = [
+    tds_records = [
         record for record in records
-        if record.record_type.lower() in LEDGER_SCRUTINY_FILE_TYPES
+        if record.record_type.lower() in TDS_FILE_TYPES
     ]
 
     clear_findings(workspace_id, db)
 
-    if not ledger_records:
+    if not tds_records:
         audit_run = AuditRun(
             workspace_id=workspace_id,
-            audit_type="ledger_scrutiny",
+            audit_type="tds_review",
             status="completed_with_limitations",
             total_records=len(records),
             checked_records=0,
@@ -409,26 +457,26 @@ def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
         return {
             "audit_run_id": audit_run.id,
             "status": audit_run.status,
-            "message": "Ledger scrutiny needs ledger-style records such as Tally Ledger Vouchers, SAP G/L Line Items, Expense Ledger, or Trial Balance.",
+            "message": "TDS review needs expense/vendor/ledger records such as Tally Ledger Vouchers, SAP Vendor Line Items, or Expense Ledger.",
             "parse_summary": parse_summary,
             "coverage": {
                 "total_records": len(records),
-                "ledger_records_checked": 0,
+                "tds_records_checked": 0,
                 "unchecked_records": len(records),
                 "issues_found": 0,
             },
         }
 
-    finding_payloads = run_ledger_scrutiny_checks(ledger_records)
+    finding_payloads = run_tds_checks(tds_records)
 
     audit_run = AuditRun(
         workspace_id=workspace_id,
-        audit_type="ledger_scrutiny",
+        audit_type="tds_review",
         status="completed",
-        total_records=len(ledger_records),
-        checked_records=len(ledger_records),
+        total_records=len(tds_records),
+        checked_records=len(tds_records),
         issues_found=len(finding_payloads),
-        unchecked_records=max(0, len(records) - len(ledger_records)),
+        unchecked_records=max(0, len(records) - len(tds_records)),
     )
 
     db.add(audit_run)
@@ -440,23 +488,23 @@ def run_ledger_scrutiny(workspace_id: int, db: Session) -> dict:
     return {
         "audit_run_id": audit_run.id,
         "status": audit_run.status,
-        "message": "Ledger scrutiny completed using uploaded ledger records",
+        "message": "TDS review completed using uploaded records",
         "parse_summary": parse_summary,
         "coverage": {
             "total_records": len(records),
-            "ledger_records_checked": len(ledger_records),
+            "tds_records_checked": len(tds_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
         },
     }
 '''
-    if "\n\ndef run_gst_reconciliation" in runner:
-        runner = runner.replace("\n\ndef run_gst_reconciliation", ledger_function + "\n\ndef run_gst_reconciliation")
-    elif "\n\ndef run_bank_reconciliation" in runner:
-        runner = runner.replace("\n\ndef run_bank_reconciliation", ledger_function + "\n\ndef run_bank_reconciliation")
+    if "\n\ndef run_ledger_scrutiny" in runner:
+        runner = runner.replace("\n\ndef run_ledger_scrutiny", tds_function + "\n\ndef run_ledger_scrutiny")
+    elif "\n\ndef run_gst_reconciliation" in runner:
+        runner = runner.replace("\n\ndef run_gst_reconciliation", tds_function + "\n\ndef run_gst_reconciliation")
     else:
-        runner += ledger_function
+        runner += tds_function
 
 RUNNER.write_text(runner, encoding="utf-8")
 
@@ -466,29 +514,34 @@ RUNNER.write_text(runner, encoding="utf-8")
 
 routes = AUDIT_RUNS.read_text(encoding="utf-8")
 
-if "run_ledger_scrutiny" not in routes:
-    if "run_gst_reconciliation," in routes:
+if "run_tds_review" not in routes:
+    if "run_ledger_scrutiny," in routes:
         routes = routes.replace(
-            "run_gst_reconciliation,",
-            "run_gst_reconciliation,\n    run_ledger_scrutiny,",
+            "run_ledger_scrutiny,",
+            "run_ledger_scrutiny,\n    run_tds_review,",
         )
     else:
         routes = routes.replace(
             "run_expense_audit,",
-            "run_expense_audit,\n    run_ledger_scrutiny,",
+            "run_expense_audit,\n    run_tds_review,",
         )
 
-if 'run-ledger-scrutiny' not in routes:
+if 'run-tds-review' not in routes:
     endpoint = r'''
 
-@router.post("/{workspace_id}/run-ledger-scrutiny")
-def run_real_ledger_scrutiny(workspace_id: int, db: Session = Depends(get_db)):
+@router.post("/{workspace_id}/run-tds-review")
+def run_real_tds_review(workspace_id: int, db: Session = Depends(get_db)):
     try:
-        return run_ledger_scrutiny(workspace_id=workspace_id, db=db)
+        return run_tds_review(workspace_id=workspace_id, db=db)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Ledger scrutiny failed: {str(exc)}")
+        raise HTTPException(status_code=400, detail=f"TDS review failed: {str(exc)}")
 '''
-    if '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")' in routes:
+    if '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")' in routes:
+        routes = routes.replace(
+            '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")',
+            endpoint + '\n\n@router.post("/{workspace_id}/run-ledger-scrutiny")',
+        )
+    elif '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")' in routes:
         routes = routes.replace(
             '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")',
             endpoint + '\n\n@router.post("/{workspace_id}/run-gst-reconciliation")',
@@ -507,101 +560,122 @@ AUDIT_RUNS.write_text(routes, encoding="utf-8")
 
 page = FRONTEND.read_text(encoding="utf-8")
 
-if "ledger_records_checked?: number;" not in page:
+if "tds_records_checked?: number;" not in page:
     page = page.replace(
-        "checked_records?: number;",
-        "checked_records?: number;\n    ledger_records_checked?: number;",
+        "ledger_records_checked?: number;",
+        "ledger_records_checked?: number;\n    tds_records_checked?: number;",
     )
 
-if "async function runLedgerScrutiny()" not in page:
-    ledger_fn = r'''
-  async function runLedgerScrutiny() {
+# Add TDS file type option
+if '<option value="tds_ledger">TDS Ledger</option>' not in page:
+    page = page.replace(
+        '<option value="expense_ledger">Expense Ledger</option>',
+        '<option value="expense_ledger">Expense Ledger</option>\n            <option value="tds_ledger">TDS Ledger</option>',
+    )
+
+# Add runTdsReview function
+if "async function runTdsReview()" not in page:
+    tds_fn = r'''
+  async function runTdsReview() {
     setBusy(true);
-    setStatusMessage("Running ledger scrutiny...");
+    setStatusMessage("Running TDS review...");
 
     try {
-      const res = await api.post(`/audit-runs/${workspaceId}/run-ledger-scrutiny`);
+      const res = await api.post(`/audit-runs/${workspaceId}/run-tds-review`);
       setAuditSummary(res.data);
       setSelectedAuditRunId(res.data.audit_run_id);
-      setStatusMessage("Ledger scrutiny completed.");
+      setStatusMessage("TDS review completed.");
       await refreshAll();
       setActiveSection("findings");
     } catch {
-      setStatusMessage("Ledger scrutiny failed.");
+      setStatusMessage("TDS review failed.");
     } finally {
       setBusy(false);
     }
   }
 
 '''
-    if "  async function runGstReconciliation()" in page:
-        page = page.replace("  async function runGstReconciliation()", ledger_fn + "  async function runGstReconciliation()")
+    if "  async function runLedgerScrutiny()" in page:
+        page = page.replace("  async function runLedgerScrutiny()", tds_fn + "  async function runLedgerScrutiny()")
     else:
-        page = page.replace("  async function runBankReconciliation()", ledger_fn + "  async function runBankReconciliation()")
+        page = page.replace("  async function runExpenseAudit()", tds_fn + "  async function runExpenseAudit()")
 
-if "runLedgerScrutiny={runLedgerScrutiny}" not in page:
-    page = page.replace(
-        "runExpenseAudit={runExpenseAudit}\n                runGstReconciliation={runGstReconciliation}",
-        "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}\n                runGstReconciliation={runGstReconciliation}",
-    )
-    page = page.replace(
-        "runExpenseAudit={runExpenseAudit}\n                runBankReconciliation={runBankReconciliation}",
-        "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}\n                runBankReconciliation={runBankReconciliation}",
-    )
+# Pass prop into AuditSection call
+if "runTdsReview={runTdsReview}" not in page:
+    if "runLedgerScrutiny={runLedgerScrutiny}" in page:
+        page = page.replace(
+            "runExpenseAudit={runExpenseAudit}\n                runLedgerScrutiny={runLedgerScrutiny}",
+            "runExpenseAudit={runExpenseAudit}\n                runTdsReview={runTdsReview}\n                runLedgerScrutiny={runLedgerScrutiny}",
+        )
+    else:
+        page = page.replace(
+            "runExpenseAudit={runExpenseAudit}\n                runGstReconciliation={runGstReconciliation}",
+            "runExpenseAudit={runExpenseAudit}\n                runTdsReview={runTdsReview}\n                runGstReconciliation={runGstReconciliation}",
+        )
 
-if "runLedgerScrutiny," not in page:
-    page = page.replace(
-        "runExpenseAudit,\n  runGstReconciliation,",
-        "runExpenseAudit,\n  runLedgerScrutiny,\n  runGstReconciliation,",
-    )
-    page = page.replace(
-        "runExpenseAudit,\n  runBankReconciliation,",
-        "runExpenseAudit,\n  runLedgerScrutiny,\n  runBankReconciliation,",
-    )
+# Add AuditSection prop destructuring
+if "runTdsReview," not in page:
+    if "runLedgerScrutiny," in page:
+        page = page.replace(
+            "runExpenseAudit,\n  runLedgerScrutiny,",
+            "runExpenseAudit,\n  runTdsReview,\n  runLedgerScrutiny,",
+        )
+    else:
+        page = page.replace(
+            "runExpenseAudit,\n  runGstReconciliation,",
+            "runExpenseAudit,\n  runTdsReview,\n  runGstReconciliation,",
+        )
 
-if "runLedgerScrutiny: () => void;" not in page:
-    page = page.replace(
-        "runExpenseAudit: () => void;\n  runGstReconciliation: () => void;",
-        "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;\n  runGstReconciliation: () => void;",
-    )
-    page = page.replace(
-        "runExpenseAudit: () => void;\n  runBankReconciliation: () => void;",
-        "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;\n  runBankReconciliation: () => void;",
-    )
+# Add AuditSection prop type
+if "runTdsReview: () => void;" not in page:
+    if "runLedgerScrutiny: () => void;" in page:
+        page = page.replace(
+            "runExpenseAudit: () => void;\n  runLedgerScrutiny: () => void;",
+            "runExpenseAudit: () => void;\n  runTdsReview: () => void;\n  runLedgerScrutiny: () => void;",
+        )
+    else:
+        page = page.replace(
+            "runExpenseAudit: () => void;\n  runGstReconciliation: () => void;",
+            "runExpenseAudit: () => void;\n  runTdsReview: () => void;\n  runGstReconciliation: () => void;",
+        )
 
-if 'key: "ledger"' not in page:
+# Add TDS module option after expense
+if 'key: "tds"' not in page:
     expense_option = r'''    {
       key: "expense",
       label: "Expense Audit",
       description: "Checks expense ledgers for duplicate vouchers, high-value spends, cash expenses, weak narration, and discretionary spend.",
       run: runExpenseAudit,
     },'''
-    ledger_option = expense_option + r'''
+    tds_option = expense_option + r'''
     {
-      key: "ledger",
-      label: "Ledger Scrutiny",
-      description: "Reviews ledger-style exports for suspense accounts, manual journals, year-end entries, cash risks, loans/advances, and repeated posting patterns.",
-      run: runLedgerScrutiny,
+      key: "tds",
+      label: "TDS Review",
+      description: "Reviews vendor/expense payments for possible TDS non-deduction, missing PAN, missing section, high-value payments, and duplicate vouchers.",
+      run: runTdsReview,
     },'''
-    page = page.replace(expense_option, ledger_option)
+    page = page.replace(expense_option, tds_option)
 
-if 'if (type === "ledger_scrutiny") return "Ledger Scrutiny";' not in page:
-    page = page.replace(
-        'if (type === "gst_reconciliation") return "GST Reconciliation";',
-        'if (type === "ledger_scrutiny") return "Ledger Scrutiny";\n  if (type === "gst_reconciliation") return "GST Reconciliation";',
-    )
-    page = page.replace(
-        'if (type === "bank_reconciliation") return "Bank Reconciliation";',
-        'if (type === "ledger_scrutiny") return "Ledger Scrutiny";\n  if (type === "bank_reconciliation") return "Bank Reconciliation";',
-    )
+# Format audit type
+if 'if (type === "tds_review") return "TDS Review";' not in page:
+    if 'if (type === "ledger_scrutiny") return "Ledger Scrutiny";' in page:
+        page = page.replace(
+            'if (type === "ledger_scrutiny") return "Ledger Scrutiny";',
+            'if (type === "tds_review") return "TDS Review";\n  if (type === "ledger_scrutiny") return "Ledger Scrutiny";',
+        )
+    else:
+        page = page.replace(
+            'if (type === "gst_reconciliation") return "GST Reconciliation";',
+            'if (type === "tds_review") return "TDS Review";\n  if (type === "gst_reconciliation") return "GST Reconciliation";',
+        )
 
-# checked records should understand ledger_records_checked
+# Coverage checked records
 page = page.replace(
-    "coverageSource?.expense_records_checked ??\n    0;",
-    "coverageSource?.expense_records_checked ??\n    coverageSource?.ledger_records_checked ??\n    0;",
+    "coverageSource?.ledger_records_checked ??\n    0;",
+    "coverageSource?.ledger_records_checked ??\n    coverageSource?.tds_records_checked ??\n    0;",
 )
 
-# Infer ledger module
+# Infer TDS module
 page = re.sub(
     r"function inferRecommendedAuditModule\(files\?: UploadedFile\[\]\) \{[\s\S]*?\n\}",
     r'''function inferRecommendedAuditModule(files?: UploadedFile[]) {
@@ -614,6 +688,7 @@ page = re.sub(
   const latest = candidates[0] ?? files[files.length - 1];
   const type = latest?.file_type?.toLowerCase() ?? "";
 
+  if (type.includes("tds")) return "tds";
   if (type.includes("gstr") || type.includes("gst_2b") || type.includes("gstr_2b")) return "gst";
   if (type.includes("sales") || type.includes("customer")) return "sales";
   if (type.includes("expense")) return "expense";
@@ -629,31 +704,30 @@ page = re.sub(
 FRONTEND.write_text(page, encoding="utf-8")
 
 # ----------------------------------------------------
-# 5. Sample ledger scrutiny data
+# 5. Sample TDS data
 # ----------------------------------------------------
 
-(SAMPLE_DIR / "ledger_scrutiny_edge_cases.csv").write_text(
-"""Voucher No,Date,Ledger Name,Narration,Debit,Credit,Voucher Type
-JV-001,01-04-2025,Office Expense,Normal office expense,12000,0,Journal
-JV-002,15-04-2025,Suspense Account,Temporary adjustment pending classification,50000,0,Journal
-JV-003,20-04-2025,Petty Cash,Cash paid for repairs,25000,0,Payment
-JV-004,31-03-2026,Provision for Expenses,Year end provision entry,150000,0,Journal
-JV-005,31-03-2026,Director Loan,Unsecured loan movement,200000,0,Journal
-JV-006,10-05-2025,,Missing ledger name,10000,0,Journal
-,12-05-2025,Repairs,Missing voucher number,8000,0,Payment
-JV-008,14-05-2025,Misc Expense,,3000,0,Journal
-JV-009,20-05-2025,Unclassified Expense,Unknown classification entry,18000,0,Journal
-JV-010,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
-JV-011,22-05-2025,Office Expense,Repeated entry pattern,7000,0,Journal
-JV-011,22-05-2025,Office Expense,Duplicate voucher reference,7000,0,Journal
+(SAMPLE_DIR / "tds_review_edge_cases.csv").write_text(
+"""Voucher No,Date,Party Name,PAN,Nature,Amount,TDS Deducted,TDS Section,Narration
+TDS-001,01-04-2025,ABC Consultants,ABCDE1234F,Professional Fees,50000,5000,194J,Proper TDS deducted
+TDS-002,05-04-2025,No TDS Consultant,BCDEF2345G,Consultancy Charges,75000,0,,Possible TDS not deducted
+TDS-003,10-04-2025,No PAN Contractor,,Contractor Payment,90000,0,,Missing PAN and TDS
+TDS-004,15-04-2025,Rent Owner,CDEFG3456H,Rent,120000,12000,,TDS deducted but section missing
+TDS-005,31-03-2026,Year End Legal Firm,DEFGH4567I,Legal Fees,150000,0,,Year-end professional payment
+TDS-006,20-05-2025,Commission Agent,EFGHI5678J,Commission,30000,0,,Threshold payment no TDS
+TDS-007,22-05-2025,Interest Party,FGHIJ6789K,Interest,60000,6000,194A,TDS deducted
+TDS-008,24-05-2025,Regular Supplier,GHIJK7890L,Purchase of goods,40000,0,,Non-TDS normal purchase
+TDS-009,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Repeated same amount
+TDS-010,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Repeated same amount
+TDS-010,26-05-2025,Duplicate Consultant,HIJKL8901M,Professional Fees,50000,0,,Duplicate voucher
 """,
 encoding="utf-8",
 )
 
-print("Ledger Scrutiny module applied.")
+print("TDS Review module applied.")
 print("Updated:")
-print(f"- {CHECKS_DIR / 'ledger_scrutiny_checks.py'}")
+print(f"- {CHECKS_DIR / 'tds_checks.py'}")
 print(f"- {RUNNER}")
 print(f"- {AUDIT_RUNS}")
 print(f"- {FRONTEND}")
-print(f"- {SAMPLE_DIR / 'ledger_scrutiny_edge_cases.csv'}")
+print(f"- {SAMPLE_DIR / 'tds_review_edge_cases.csv'}")

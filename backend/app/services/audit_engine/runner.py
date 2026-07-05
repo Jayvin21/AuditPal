@@ -13,6 +13,7 @@ from app.services.audit_engine.checks.expense_checks import run_expense_checks
 from app.services.audit_engine.checks.sales_checks import run_sales_checks
 from app.services.audit_engine.checks.gst_reco_checks import run_gst_reconciliation_checks
 from app.services.audit_engine.checks.ledger_scrutiny_checks import run_ledger_scrutiny_checks
+from app.services.audit_engine.checks.tds_checks import run_tds_checks
 from app.services.audit_engine.checks.bank_reco_checks import run_bank_reconciliation_checks
 from app.services.extractors.tabular_extractor import extract_tabular_file
 
@@ -78,6 +79,17 @@ LEDGER_SCRUTINY_FILE_TYPES = {
     "cash_bank_ledger",
     "bank_ledger",
     "trial_balance",
+}
+
+
+TDS_FILE_TYPES = {
+    "tds_ledger",
+    "expense_ledger",
+    "tally_ledger_vouchers",
+    "sap_gl_line_items",
+    "sap_vendor_line_items",
+    "purchase_register",
+    "tally_purchase_register",
 }
 
 
@@ -442,6 +454,82 @@ def run_expense_audit(workspace_id: int, db: Session) -> dict:
         "coverage": {
             "total_records": len(records),
             "expense_records_checked": len(expense_records),
+            "unchecked_records": audit_run.unchecked_records,
+            "issues_found": len(finding_payloads),
+            "risk_counts": risk_counts(finding_payloads),
+        },
+    }
+
+
+def run_tds_review(workspace_id: int, db: Session) -> dict:
+    parse_summary = parse_workspace_files(workspace_id, db, force_reparse=False)
+
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.workspace_id == workspace_id)
+        .all()
+    )
+
+    tds_records = [
+        record for record in records
+        if record.record_type.lower() in TDS_FILE_TYPES
+    ]
+
+    clear_findings(workspace_id, db)
+
+    if not tds_records:
+        audit_run = AuditRun(
+            workspace_id=workspace_id,
+            audit_type="tds_review",
+            status="completed_with_limitations",
+            total_records=len(records),
+            checked_records=0,
+            issues_found=0,
+            unchecked_records=len(records),
+        )
+        db.add(audit_run)
+        db.commit()
+        db.refresh(audit_run)
+
+        return {
+            "audit_run_id": audit_run.id,
+            "status": audit_run.status,
+            "message": "TDS review needs expense/vendor/ledger records such as Tally Ledger Vouchers, SAP Vendor Line Items, or Expense Ledger.",
+            "parse_summary": parse_summary,
+            "coverage": {
+                "total_records": len(records),
+                "tds_records_checked": 0,
+                "unchecked_records": len(records),
+                "issues_found": 0,
+            },
+        }
+
+    finding_payloads = run_tds_checks(tds_records)
+
+    audit_run = AuditRun(
+        workspace_id=workspace_id,
+        audit_type="tds_review",
+        status="completed",
+        total_records=len(tds_records),
+        checked_records=len(tds_records),
+        issues_found=len(finding_payloads),
+        unchecked_records=max(0, len(records) - len(tds_records)),
+    )
+
+    db.add(audit_run)
+    db.commit()
+    db.refresh(audit_run)
+
+    save_findings(workspace_id, audit_run.id, finding_payloads, db)
+
+    return {
+        "audit_run_id": audit_run.id,
+        "status": audit_run.status,
+        "message": "TDS review completed using uploaded records",
+        "parse_summary": parse_summary,
+        "coverage": {
+            "total_records": len(records),
+            "tds_records_checked": len(tds_records),
             "unchecked_records": audit_run.unchecked_records,
             "issues_found": len(finding_payloads),
             "risk_counts": risk_counts(finding_payloads),
